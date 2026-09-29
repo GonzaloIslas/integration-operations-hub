@@ -8,8 +8,8 @@ This list reflects the remaining product work described in the V1 design and its
 - [x] Validate payment and refund request payloads.
 - [x] Enforce the refundable-balance rule and record payment/refund lifecycle events.
 - [x] Provide a liveness endpoint.
-- [ ] Add a supported payment-status transition (for example, provider confirmation from `pending` to `succeeded`). Refunds currently require a payment to be `succeeded`, but the public API has no transition that can set that state.
-- [ ] Define and enforce all payment/refund state transitions, including how a fully refunded payment becomes `refunded`.
+- [x] Simulate provider confirmations and normalized provider failures, including retryability.
+- [x] Transition successful payments to `succeeded` and fully refunded payments to `refunded`.
 - [ ] Make operation logs a complete, immutable request-inspection audit trail (request context, normalized response/error, actor, and timestamps).
 - [ ] Add database migrations and constraints/indexes appropriate for PostgreSQL; table creation at application startup is not a migration strategy.
 - [ ] Add structured logging coverage, error handling for database failures, and a readiness check that verifies database connectivity.
@@ -17,7 +17,7 @@ This list reflects the remaining product work described in the V1 design and its
 
 ## Later milestones
 
-- [ ] Provider simulators/adapters and normalized provider errors.
+- [ ] Replace deterministic provider simulators with real provider adapters and provider-specific contract tests.
 - [ ] Authentication and authorization for operator actions.
 - [ ] React operations UI for payment lookup, inspection, and refunds.
 - [ ] Webhook ingestion, idempotency handling, retries, queues, and asynchronous processing.

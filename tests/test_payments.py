@@ -44,11 +44,11 @@ def test_create_and_read_payment_preserves_correlation_id():
     found = client.get(f"/payments/{payment_id}")
     assert found.status_code == 200
     assert found.json()["correlation_id"] == "payment-42"
-    assert found.json()["status"] == "pending"
+    assert found.json()["status"] == "succeeded"
 
 
-def test_refund_is_rejected_until_payment_is_successful():
-    response = client.post("/payments", json={"amount": "50.00", "currency": "USD", "provider": "AcmePay"})
+def test_refund_is_rejected_for_a_failed_payment():
+    response = client.post("/payments", json={"amount": "50.00", "currency": "USD", "provider": "DeclinePay"})
     refund = client.post(f"/payments/{response.json()['id']}/refunds", json={"amount": "10.00"})
     assert refund.status_code == 409
     assert refund.json()["detail"] == "Only succeeded payments can be refunded."
@@ -56,15 +56,24 @@ def test_refund_is_rejected_until_payment_is_successful():
 
 def test_partial_refund_cannot_exceed_original_payment():
     response = client.post("/payments", json={"amount": "50.00", "currency": "USD", "provider": "AcmePay"})
-    with TestingSession() as session:
-        payment = session.get(Payment, uuid.UUID(response.json()["id"]))
-        payment.status = PaymentStatus.SUCCEEDED
-        session.commit()
-
     first_refund = client.post(f"/payments/{response.json()['id']}/refunds", json={"amount": "30.00"})
     too_large = client.post(f"/payments/{response.json()['id']}/refunds", json={"amount": "25.00"})
     assert first_refund.status_code == 201
     assert too_large.status_code == 409
+
+
+def test_successful_payment_can_be_fully_refunded():
+    payment = client.post(
+        "/payments", json={"amount": "50.00", "currency": "USD", "provider": "AcmePay"}
+    )
+
+    refund = client.post(f"/payments/{payment.json()['id']}/refunds", json={"amount": "50.00"})
+
+    assert refund.status_code == 201
+    assert refund.json()["status"] == "refunded"
+    assert refund.json()["refunds"] == [
+        {**refund.json()["refunds"][0], "amount": "50.00", "status": "succeeded"}
+    ]
 
 
 def test_health_check_reports_service_is_available():
@@ -110,3 +119,28 @@ def test_payment_and_refund_payloads_are_validated():
 
     assert invalid_payment.status_code == 422
     assert invalid_refund.status_code == 422
+
+
+def test_provider_decline_is_normalized_in_the_payment_response():
+    response = client.post(
+        "/payments",
+        json={"amount": "10.00", "currency": "USD", "provider": "DeclinePay"},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["status"] == "failed"
+    assert response.json()["failure_code"] == "card_declined"
+    assert response.json()["failure_message"] == "The provider declined the payment."
+    assert response.json()["retryable"] is False
+
+
+def test_provider_timeout_is_normalized_as_retryable():
+    response = client.post(
+        "/payments",
+        json={"amount": "10.00", "currency": "USD", "provider": "TimeoutPay"},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["status"] == "failed"
+    assert response.json()["failure_code"] == "provider_timeout"
+    assert response.json()["retryable"] is True
