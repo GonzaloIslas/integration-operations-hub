@@ -34,6 +34,9 @@ class PaymentRead(BaseModel):
     status: PaymentStatus
     correlation_id: str
     provider_reference: str | None
+    failure_code: str | None
+    failure_message: str | None
+    retryable: bool | None
     created_at: datetime
     updated_at: datetime
     refunds: list[RefundRead] = []

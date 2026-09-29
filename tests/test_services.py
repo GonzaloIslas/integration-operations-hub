@@ -40,28 +40,24 @@ def test_create_payment_persists_payment_and_lifecycle_log(session: Session):
     events = session.scalars(select(OperationLog.event_type).where(OperationLog.payment_id == payment.id)).all()
 
     assert stored.amount == Decimal("50.00")
-    assert stored.status == PaymentStatus.PENDING
-    assert events == ["payment.created"]
+    assert stored.status == PaymentStatus.SUCCEEDED
+    assert events == ["payment.created", "payment.provider_succeeded"]
 
 
 def test_successful_refund_is_persisted_and_logged(session: Session):
     payment = _create_payment(session)
-    payment.status = PaymentStatus.SUCCEEDED
-    session.commit()
-
     refunded_payment = create_refund(session, payment.id, RefundCreate(amount=Decimal("50.00")))
     events = session.scalars(select(OperationLog.event_type).where(OperationLog.payment_id == payment.id)).all()
 
     assert [(refund.amount, str(refund.status)) for refund in refunded_payment.refunds] == [
-        (Decimal("50.00"), "pending")
+        (Decimal("50.00"), "succeeded")
     ]
-    assert events == ["payment.created", "refund.created"]
+    assert refunded_payment.status == PaymentStatus.REFUNDED
+    assert events == ["payment.created", "payment.provider_succeeded", "refund.provider_succeeded"]
 
 
 def test_failed_refunds_do_not_reduce_the_remaining_refundable_balance(session: Session):
     payment = _create_payment(session)
-    payment.status = PaymentStatus.SUCCEEDED
-    session.commit()
     create_refund(session, payment.id, RefundCreate(amount=Decimal("50.00")))
     refund = get_payment(session, payment.id).refunds[0]
     refund.status = "failed"
@@ -74,9 +70,26 @@ def test_failed_refunds_do_not_reduce_the_remaining_refundable_balance(session: 
 
 def test_refund_cannot_exceed_payment_when_existing_refund_is_pending(session: Session):
     payment = _create_payment(session)
-    payment.status = PaymentStatus.SUCCEEDED
-    session.commit()
     create_refund(session, payment.id, RefundCreate(amount=Decimal("40.00")))
 
     with pytest.raises(InvalidRefundError, match="remaining refundable balance"):
         create_refund(session, payment.id, RefundCreate(amount=Decimal("10.01")))
+
+
+def test_provider_failure_is_persisted_as_a_normalized_operation_log(session: Session):
+    payment = create_payment(
+        session,
+        PaymentCreate(amount=Decimal("50.00"), currency="USD", provider="TimeoutPay"),
+        "provider-failure-correlation-id",
+    )
+    failure_log = session.scalar(
+        select(OperationLog).where(
+            OperationLog.payment_id == payment.id, OperationLog.event_type == "payment.provider_failed"
+        )
+    )
+
+    assert payment.status == PaymentStatus.FAILED
+    assert payment.failure_code == "provider_timeout"
+    assert payment.retryable is True
+    assert failure_log is not None
+    assert '"retryable": true' in failure_log.detail
