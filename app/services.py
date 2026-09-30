@@ -7,7 +7,13 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.config import get_settings
 from app.models import OperationLog, Payment, PaymentStatus, Refund, RefundStatus, WebhookEvent
-from app.providers import NormalizedProviderError, ProviderChargeRequest, SimulationCase, get_payment_provider
+from app.providers import (
+    NormalizedProviderError,
+    ProviderChargeRequest,
+    SimulationCase,
+    get_payment_provider,
+    list_provider_definitions,
+)
 from app.schemas import PaymentCreate, RefundCreate, RetryCreate, WebhookEventCreate
 
 
@@ -104,6 +110,103 @@ def get_payment_operations(session: Session, payment_id: uuid.UUID) -> list[Oper
     get_payment(session, payment_id)
     statement = select(OperationLog).where(OperationLog.payment_id == payment_id).order_by(OperationLog.created_at.asc())
     return list(session.scalars(statement))
+
+
+def get_dashboard(session: Session, recent_limit: int = 5) -> dict[str, object]:
+    payments = list(
+        session.scalars(select(Payment).options(selectinload(Payment.refunds)).order_by(Payment.created_at.desc()))
+    )
+    operations = list(session.scalars(select(OperationLog).order_by(OperationLog.created_at.desc())))
+    providers = {
+        definition.name: {
+            "name": definition.name,
+            "display_name": definition.display_name,
+            "total_payments": 0,
+            "successful_payments": 0,
+            "failed_payments": 0,
+            "retryable_failures": 0,
+            "latencies": [],
+        }
+        for definition in list_provider_definitions()
+    }
+
+    for payment in payments:
+        provider = providers.setdefault(
+            payment.provider.lower(),
+            {
+                "name": payment.provider.lower(),
+                "display_name": payment.provider,
+                "total_payments": 0,
+                "successful_payments": 0,
+                "failed_payments": 0,
+                "retryable_failures": 0,
+                "latencies": [],
+            },
+        )
+        provider["total_payments"] += 1
+        if payment.status in {PaymentStatus.SUCCEEDED, PaymentStatus.REFUNDED}:
+            provider["successful_payments"] += 1
+        elif payment.status == PaymentStatus.FAILED:
+            provider["failed_payments"] += 1
+            if payment.retryable:
+                provider["retryable_failures"] += 1
+
+    for operation in operations:
+        if operation.event_type not in {
+            "payment.provider_succeeded",
+            "payment.provider_failed",
+            "payment.retry_succeeded",
+            "payment.retry_failed",
+        } or not operation.detail:
+            continue
+        detail = json.loads(operation.detail)
+        provider_name = detail.get("provider")
+        latency_ms = detail.get("latency_ms")
+        if provider_name and isinstance(latency_ms, int | float) and provider_name.lower() in providers:
+            providers[provider_name.lower()]["latencies"].append(latency_ms)
+
+    provider_health = []
+    for provider in providers.values():
+        total = provider["total_payments"]
+        success_rate = round(provider["successful_payments"] / total * 100, 1) if total else 0.0
+        error_rate = round(provider["failed_payments"] / total * 100, 1) if total else 0.0
+        latencies = provider["latencies"]
+        average_latency = round(sum(latencies) / len(latencies), 1) if latencies else None
+        provider_health.append(
+            {
+                "name": provider["name"],
+                "display_name": provider["display_name"],
+                "health": _health_status(total, error_rate),
+                "total_payments": total,
+                "success_rate": success_rate,
+                "error_rate": error_rate,
+                "average_latency_ms": average_latency,
+                "retryable_failures": provider["retryable_failures"],
+            }
+        )
+
+    total_payments = len(payments)
+    successful_payments = sum(payment.status in {PaymentStatus.SUCCEEDED, PaymentStatus.REFUNDED} for payment in payments)
+    failed_payments = sum(payment.status == PaymentStatus.FAILED for payment in payments)
+    refunded_payments = sum(payment.status == PaymentStatus.REFUNDED for payment in payments)
+    retryable_failures = sum(payment.status == PaymentStatus.FAILED and bool(payment.retryable) for payment in payments)
+    all_latencies = [latency for provider in providers.values() for latency in provider["latencies"]]
+
+    return {
+        "summary": {
+            "total_payments": total_payments,
+            "successful_payments": successful_payments,
+            "failed_payments": failed_payments,
+            "refunded_payments": refunded_payments,
+            "success_rate": round(successful_payments / total_payments * 100, 1) if total_payments else 0.0,
+            "error_rate": round(failed_payments / total_payments * 100, 1) if total_payments else 0.0,
+            "retryable_failures": retryable_failures,
+            "average_latency_ms": round(sum(all_latencies) / len(all_latencies), 1) if all_latencies else None,
+        },
+        "providers": sorted(provider_health, key=lambda provider: provider["display_name"]),
+        "recent_payments": payments[:recent_limit],
+        "recent_failures": [payment for payment in payments if payment.status == PaymentStatus.FAILED][:recent_limit],
+    }
 
 
 def retry_payment(session: Session, payment_id: uuid.UUID, request: RetryCreate) -> Payment:
@@ -265,6 +368,7 @@ def _apply_provider_outcome(
                 detail=json.dumps(
                     {
                         "code": error.code,
+                        "provider": payment.provider,
                         "message": error.message,
                         "retryable": error.retryable,
                         "http_status": error.http_status,
@@ -288,3 +392,13 @@ def _matches_idempotent_request(payment: Payment, request: PaymentCreate) -> boo
 
 def _simulation_case_value(simulation_case: SimulationCase | None) -> str | None:
     return simulation_case.value if simulation_case is not None else None
+
+
+def _health_status(total_payments: int, error_rate: float) -> str:
+    if total_payments == 0:
+        return "unknown"
+    if error_rate == 0:
+        return "healthy"
+    if error_rate < 25:
+        return "degraded"
+    return "down"

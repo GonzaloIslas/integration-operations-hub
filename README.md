@@ -4,7 +4,7 @@ Integration Operations Hub is a portfolio product for operating and troubleshoot
 
 The canonical V1–V10 plan lives in [TODO.md](./TODO.md). Each new version starts from the current `master`; earlier working branches are preserved but never used as a base.
 
-## Current milestone: V5 production engineering
+## V5 production engineering foundation
 
 V5 makes the application operable as a small production-style service:
 
@@ -18,6 +18,17 @@ V5 makes the application operable as a small production-style service:
 - System workflow tests for idempotency, retry, webhooks, and metrics.
 
 Redis, RabbitMQ, workers, distributed rate limiting, and asynchronous retries are intentionally deferred. The present synchronous workload does not justify that infrastructure; V8 will add it when retry orchestration becomes the product concern.
+
+## Current milestone: V6 operational dashboard
+
+V6 turns persisted payment and lifecycle data into an operational dashboard backed by `GET /dashboard`:
+
+- Provider health: `healthy`, `degraded`, `down`, or `unknown`.
+- Per-provider success/error rate, observed average latency, and retryable failure count.
+- Overall success/error rates, retry queue depth, and observed provider latency.
+- Recent requests and recent failures that link to the existing payment inspector.
+
+These are derived from the current database and lifecycle logs, not fabricated frontend data. The dashboard deliberately reports observed historical data; V5/V6 do not yet include a separate metrics store, alerting, or distributed tracing.
 
 ## Architecture
 
@@ -51,6 +62,7 @@ All operations endpoints require either local HTTP Basic credentials or `X-API-K
 | GET | `/health` | Process liveness |
 | GET | `/ready` | Database readiness |
 | GET | `/metrics` | Prometheus-style request metrics |
+| GET | `/dashboard` | Operational dashboard aggregate |
 | POST | `/payments` | Create an idempotent payment request |
 | GET | `/payments?limit=&offset=` | List payments with offset pagination |
 | GET | `/payments/{payment_id}` | Retrieve a payment and refunds |

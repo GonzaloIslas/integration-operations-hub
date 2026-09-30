@@ -34,5 +34,34 @@ export interface Integration {
   name: string;
   display_name: string;
   description: string;
-  is_simulated: boolean;
+    is_simulated: boolean;
+}
+
+export interface DashboardSummary {
+  total_payments: number;
+  successful_payments: number;
+  failed_payments: number;
+  refunded_payments: number;
+  success_rate: number;
+  error_rate: number;
+  retryable_failures: number;
+  average_latency_ms: number | null;
+}
+
+export interface ProviderHealth {
+  name: string;
+  display_name: string;
+  health: "healthy" | "degraded" | "down" | "unknown";
+  total_payments: number;
+  success_rate: number;
+  error_rate: number;
+  average_latency_ms: number | null;
+  retryable_failures: number;
+}
+
+export interface DashboardData {
+  summary: DashboardSummary;
+  providers: ProviderHealth[];
+  recent_payments: Payment[];
+  recent_failures: Payment[];
 }

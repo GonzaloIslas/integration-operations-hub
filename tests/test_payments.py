@@ -196,6 +196,34 @@ def test_payment_list_supports_offset_pagination():
     assert "X-Next-Offset" not in second_page.headers
 
 
+def test_dashboard_aggregates_provider_health_recent_failures_and_retry_queue():
+    client.post("/payments", json={"amount": "10.00", "currency": "USD", "provider": "AcmePay"})
+    client.post("/payments", json={"amount": "20.00", "currency": "USD", "provider": "BrokenPay"})
+    client.post(
+        "/payments",
+        json={"amount": "30.00", "currency": "USD", "provider": "SlowPay", "simulation_case": "timeout"},
+    )
+
+    dashboard = client.get("/dashboard")
+    providers = {provider["name"]: provider for provider in dashboard.json()["providers"]}
+
+    assert dashboard.status_code == 200
+    assert dashboard.json()["summary"] == {
+        "total_payments": 3,
+        "successful_payments": 1,
+        "failed_payments": 2,
+        "refunded_payments": 0,
+        "success_rate": 33.3,
+        "error_rate": 66.7,
+        "retryable_failures": 2,
+        "average_latency_ms": 1026.7,
+    }
+    assert providers["acmepay"]["health"] == "healthy"
+    assert providers["brokenpay"]["health"] == "down"
+    assert providers["slowpay"]["retryable_failures"] == 1
+    assert len(dashboard.json()["recent_failures"]) == 2
+
+
 def test_integration_api_key_authenticates_a_service_client():
     response = TestClient(app, headers={"X-API-Key": "local-integration-api-key"}).get("/integrations")
 

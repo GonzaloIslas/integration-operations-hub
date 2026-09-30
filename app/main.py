@@ -14,6 +14,7 @@ from app.observability import configure_logging, elapsed_milliseconds, metrics, 
 from app.providers import get_integration, list_integrations
 from app.schemas import (
     IntegrationRead,
+    DashboardRead,
     OperationLogRead,
     PaymentCreate,
     PaymentRead,
@@ -31,6 +32,7 @@ from app.services import (
     create_payment,
     create_refund,
     get_payment,
+    get_dashboard,
     get_payment_operations,
     list_payments,
     process_webhook,
@@ -118,6 +120,11 @@ def readiness() -> dict[str, str]:
 @app.get("/metrics", response_class=PlainTextResponse)
 def read_metrics() -> str:
     return metrics.render_prometheus()
+
+
+@app.get("/dashboard", response_model=DashboardRead, dependencies=[Depends(enforce_rate_limit)])
+def read_dashboard(session: Session = Depends(database_session)) -> DashboardRead:
+    return DashboardRead.model_validate(get_dashboard(session))
 
 
 @app.post(
