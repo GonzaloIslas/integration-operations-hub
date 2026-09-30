@@ -2,12 +2,15 @@ import logging
 import uuid
 from collections.abc import Generator
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.database import Base, engine, get_session
+from app.observability import configure_logging, elapsed_milliseconds, metrics, start_timer
 from app.providers import get_integration, list_integrations
 from app.schemas import (
     IntegrationRead,
@@ -34,10 +37,10 @@ from app.services import (
     retry_payment,
 )
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+configure_logging(get_settings().log_level)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Integration Operations Hub", version="0.0.4")
+app = FastAPI(title="Integration Operations Hub", version="0.0.5")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[get_settings().frontend_origin],
@@ -57,9 +60,64 @@ def database_session() -> Generator[Session, None, None]:
     yield from get_session()
 
 
+@app.middleware("http")
+async def observe_request(request: Request, call_next):
+    correlation_id = request.headers.get("X-Correlation-ID") or str(uuid.uuid4())
+    request.state.correlation_id = correlation_id
+    started_at = start_timer()
+    try:
+        response = await call_next(request)
+    except Exception:
+        duration_ms = elapsed_milliseconds(started_at)
+        metrics.record_request(request.method, request.url.path, 500, duration_ms)
+        logger.exception(
+            "http.request_failed",
+            extra={
+                "correlation_id": correlation_id,
+                "method": request.method,
+                "path": request.url.path,
+                "status_code": 500,
+                "duration_ms": round(duration_ms, 3),
+            },
+        )
+        raise
+    duration_ms = elapsed_milliseconds(started_at)
+    route = request.scope.get("route")
+    metric_path = getattr(route, "path", request.url.path)
+    metrics.record_request(request.method, metric_path, response.status_code, duration_ms)
+    response.headers.setdefault("X-Correlation-ID", correlation_id)
+    logger.info(
+        "http.request_completed",
+        extra={
+            "correlation_id": correlation_id,
+            "method": request.method,
+            "path": metric_path,
+            "status_code": response.status_code,
+            "duration_ms": round(duration_ms, 3),
+        },
+    )
+    return response
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/ready")
+def readiness() -> dict[str, str]:
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+    except Exception as error:
+        logger.exception("readiness.database_failed")
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Database is unavailable.") from error
+    return {"status": "ready", "database": "ok"}
+
+
+@app.get("/metrics", response_class=PlainTextResponse)
+def read_metrics() -> str:
+    return metrics.render_prometheus()
 
 
 @app.post(
@@ -70,12 +128,13 @@ def health() -> dict[str, str]:
 )
 def post_payment(
     payload: PaymentCreate,
+    request: Request,
     response: Response,
     x_correlation_id: str | None = Header(default=None),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     session: Session = Depends(database_session),
 ) -> PaymentRead:
-    correlation_id = x_correlation_id or str(uuid.uuid4())
+    correlation_id = x_correlation_id or request.state.correlation_id
     effective_idempotency_key = idempotency_key or f"generated:{correlation_id}"
     try:
         payment, replayed = create_payment(session, payload, correlation_id, effective_idempotency_key)

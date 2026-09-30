@@ -12,3 +12,33 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+  api:
+    build:
+      context: .
+    environment:
+      APPLICATION_ENVIRONMENT: container
+      DATABASE_URL: postgresql+psycopg://hub:hub@db:5432/integration_hub
+      FRONTEND_ORIGIN: http://localhost:8080
+      OPERATOR_USERNAME: operator
+      OPERATOR_PASSWORD: local-development-only
+      INTEGRATION_API_KEY: local-integration-api-key
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_BASE_URL: http://localhost:8000
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "8080:80"

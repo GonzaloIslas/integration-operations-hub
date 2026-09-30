@@ -4,48 +4,53 @@ Integration Operations Hub is a portfolio product for operating and troubleshoot
 
 The canonical V1–V10 plan lives in [TODO.md](./TODO.md). Each new version starts from the current `master`; earlier working branches are preserved but never used as a base.
 
-## Current milestone: V4 integration controls
+## Current milestone: V5 production engineering
 
-V4 adds a practical, synchronous integration-control layer on top of V3 provider simulations:
+V5 makes the application operable as a small production-style service:
 
-- Local operator Basic authentication and integration API-key authentication.
-- Fixed-window per-principal rate limiting.
-- Idempotent payment creation with replay/conflict handling.
-- Offset pagination for operations queries.
-- Configurable provider timeout enforcement.
-- Manual retry for retryable failures.
-- Authenticated, idempotent webhook ingestion.
-- Correlation and normalized protocol context in lifecycle logs.
+- Docker images for FastAPI and the React frontend.
+- Compose orchestration for PostgreSQL, API, and frontend.
+- Correlation-aware structured JSON request logs.
+- Prometheus-style request metrics at `/metrics`.
+- Separate liveness (`/health`) and database readiness (`/ready`) checks.
+- Centralized environment-driven configuration.
+- GitHub Actions CI for Python tests, frontend tests, and frontend builds.
+- System workflow tests for idempotency, retry, webhooks, and metrics.
 
-OAuth is intentionally deferred: there is no real authorization server or third-party OAuth flow to integrate yet. Adding a fake one would not demonstrate an integration concern honestly. Distributed rate limiting, automatic retries, and queue-backed webhook processing remain later production work.
+Redis, RabbitMQ, workers, distributed rate limiting, and asynchronous retries are intentionally deferred. The present synchronous workload does not justify that infrastructure; V8 will add it when retry orchestration becomes the product concern.
 
 ## Architecture
 
 ```text
-React + TypeScript (Vite)
-        |
-        v
-FastAPI API -- Basic auth / API key -- rate limit
-        |
-        v
-Payment service -- idempotency / retry / webhook processing
-        |
-        v
+Browser
+   |
+   v
+React + TypeScript (Nginx container)
+   |
+   v
+FastAPI API -- auth / rate limits / metrics / readiness
+   |
+   v
+Payment service -- idempotency / retry / webhooks
+   |
+   v
 Provider adapter -> deterministic provider simulator
-        |
-        v
-SQLAlchemy -> PostgreSQL
+   |
+   v
+PostgreSQL
 ```
 
-The provider adapter normalizes raw status, body, and latency results. The payment service records correlation-aware, operator-safe protocol context and applies idempotency/retry/webhook rules before persisting a lifecycle change.
+Every HTTP response receives a correlation ID. Request completion is logged as JSON with method, route, response status, duration, and correlation ID. The `/metrics` endpoint exposes request counters and duration sums in Prometheus text format.
 
-## API
+## API operations
 
-All operations endpoints require either local HTTP Basic credentials or `X-API-Key`. The health endpoint remains public.
+All operations endpoints require either local HTTP Basic credentials or `X-API-Key`; `/health`, `/ready`, and `/metrics` are operational endpoints.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| GET | `/health` | Liveness check |
+| GET | `/health` | Process liveness |
+| GET | `/ready` | Database readiness |
+| GET | `/metrics` | Prometheus-style request metrics |
 | POST | `/payments` | Create an idempotent payment request |
 | GET | `/payments?limit=&offset=` | List payments with offset pagination |
 | GET | `/payments/{payment_id}` | Retrieve a payment and refunds |
@@ -53,46 +58,20 @@ All operations endpoints require either local HTTP Basic credentials or `X-API-K
 | POST | `/payments/{payment_id}/retry` | Manually retry an eligible failed payment |
 | POST | `/payments/{payment_id}/refunds` | Create a validated refund |
 | POST | `/webhooks/{provider}` | Ingest an idempotent provider webhook |
-| GET | `/integrations` | List integration definitions |
-| GET | `/integrations/{integration_name}` | Retrieve integration details |
 
-### Integration headers
+See [docs/v4-integration-controls.md](./docs/v4-integration-controls.md) for authentication, idempotency, retry, and webhook behavior.
 
-| Header | Purpose |
-| --- | --- |
-| `X-API-Key` | Authenticates a service/provider client. |
-| `Idempotency-Key` | Makes repeated `POST /payments` calls replay safely. |
-| `X-Correlation-ID` | Propagates an operator-supplied trace identifier. |
+## Run the full stack
 
-`POST /payments` returns `Idempotency-Key`, `Idempotency-Replayed`, and `X-Correlation-ID`. Paginated payment lists return `X-Total-Count` and, when more data exists, `X-Next-Offset`.
-
-For V3/V4 exploration, `POST /payments` accepts an optional `simulation_case` test control. See [docs/v3-provider-simulation.md](./docs/v3-provider-simulation.md).
-
-## Local configuration
-
-These development-only defaults can be overridden by environment variables:
-
-| Setting | Default |
-| --- | --- |
-| `OPERATOR_USERNAME` | `operator` |
-| `OPERATOR_PASSWORD` | `local-development-only` |
-| `INTEGRATION_API_KEY` | `local-integration-api-key` |
-| `API_RATE_LIMIT` | `100` requests |
-| `API_RATE_WINDOW_SECONDS` | `60` seconds |
-| `PROVIDER_TIMEOUT_MS` | `2000` milliseconds |
-
-Do not use real production credentials in this configuration. V4 uses local development configuration to demonstrate the control boundaries; a production identity and secrets-management design belongs to later work.
-
-## Repository structure
-
-```text
-app/        FastAPI API, integration controls, adapter layer, and simulators
-frontend/   React + TypeScript operations console
-tests/      API, service, security, and provider-contract tests
-docs/       Architecture decisions and milestone documentation
+```powershell
+docker compose up --build
 ```
 
-## Run locally
+Open the React console at `http://localhost:8080`; the API is available at `http://localhost:8000`. The default local operator is `operator` / `local-development-only`.
+
+The Compose defaults are strictly local-development values. Override credentials and configuration through environment variables or a non-committed `.env` file; never use real production credentials in this repository configuration.
+
+## Run without Docker
 
 ### Backend
 
@@ -109,8 +88,6 @@ For early learning, SQLite is supported with `DATABASE_URL=sqlite:///./integrati
 
 ### Frontend
 
-In a separate terminal, with the API running:
-
 ```powershell
 cd frontend
 npm install
@@ -122,10 +99,11 @@ The frontend expects the API at `http://127.0.0.1:8000` by default. Set `VITE_AP
 ## Verify
 
 ```powershell
+python -m compileall -q app
 python -m pytest -q
 cd frontend
 npm run test
 npm run build
 ```
 
-See [docs/v2-frontend.md](./docs/v2-frontend.md), [docs/v3-provider-simulation.md](./docs/v3-provider-simulation.md), and [docs/v4-integration-controls.md](./docs/v4-integration-controls.md) for milestone details.
+See [docs/v5-production-engineering.md](./docs/v5-production-engineering.md) for operational boundaries and the verification strategy.
