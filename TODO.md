@@ -1,52 +1,46 @@
 # Integration Operations Hub — Canonical Project Plan
 
-This file is the implementation checklist derived from the original project brief. Read it before proposing, planning, or implementing work. Do not infer a version's scope from a branch name or from a terse request such as “V2”; confirm it against this plan first.
+Read this roadmap before planning or implementing a version. Map work to the project brief rather than inferring scope from a branch name or an abbreviated request.
 
-## Project guardrails
+## Guardrails
 
 - Build a realistic integration-operations product incrementally; do not turn it into an architecture exercise.
-- Treat the user as a senior .NET engineer learning Python and React, not as a beginner programmer.
-- Explain Python/React trade-offs in .NET terms when useful, without reteaching basic engineering concepts.
+- Treat the user as a senior .NET engineer learning Python, React, and TypeScript.
+- Explain meaningful trade-offs in .NET terms when useful, without reteaching basic engineering concepts.
 - Do not claim a technology is mastered simply because it appears in the repository.
-- Do not silently alter the agreed version scope. When a request is ambiguous, identify the mapped roadmap step before implementation.
+- New work begins by pulling `master` and creating a fresh branch from it. Preserve earlier working branches, but do not use them as a base.
 
-## Current state and required correction
+## Current state
 
-- [x] V1 backend foundation is on `master`: FastAPI, payment/refund models, REST endpoints, PostgreSQL Docker configuration, and tests.
-- [x] The prior `v2` provider-simulation work was merged into `master` and is preserved as requested.
-- [ ] Do not present that provider work as true V2 or as complete V3. It is an out-of-sequence, limited implementation that needs deliberate V3 review later.
-- [ ] Review V1 against the brief before calling it complete: PostgreSQL migrations, test strategy, and API shape still need deliberate decisions.
+- [x] V1 Python backend is merged into `master`: FastAPI, payment/refund models, REST endpoints, PostgreSQL Docker configuration, and automated tests.
+- [x] V2 React/TypeScript frontend is merged into `master`.
+- [x] V3 replaces the earlier limited simulator with the planned five-provider integration simulation and contract tests.
+- [ ] PostgreSQL migrations, shared-database safety, and the V1 API/data-model review remain deliberate follow-up work.
 
 ## V1 — Python backend
 
 - [x] FastAPI backend, basic models, REST API, and automated tests.
 - [x] Health endpoint and Docker Compose PostgreSQL configuration.
-- [ ] Validate the initial API and data-model decisions against the product requirements; keep V1 small and useful.
-- [ ] Document the V1 architecture, data model, API behavior, and testing decisions.
+- [ ] Document the settled V1 architecture, data model, API behavior, and testing decisions.
 
 ## V2 — React / TypeScript frontend
 
-- [x] Create a React + TypeScript application that consumes the real FastAPI API.
-- [x] Dashboard view.
-- [x] Payments list and payment-details views.
-- [x] Integration list and integration-details views.
-- [x] Sanitized operation inspection UI for payment request and provider-result context.
-- [x] Loading, validation, and error states.
-- [x] Local operator authentication using the real backend contract; production identity remains V4 work.
-- [x] Add focused frontend tests and document the frontend structure.
+- [x] React + TypeScript application consuming the real FastAPI API.
+- [x] Dashboard, payments, integrations, sanitized operation inspection, loading/error states, and local authentication boundary.
+- [x] Focused frontend tests and V2 documentation.
 
 ## V3 — Integration simulation
 
-- [ ] Review the limited simulator code already on `master`, then expand or replace it intentionally.
-- [ ] Build fake providers: AcmePay, BancoX, WalletPro, SlowPay, and BrokenPay.
-- [ ] Model realistic outcomes: success, authentication failure, timeout, HTTP 500, HTTP 429, malformed response, slow response, duplicate request, and differing response formats.
-- [ ] Add an integration layer and provider-focused contract tests.
+- [x] Five fake providers: AcmePay, BancoX, WalletPro, SlowPay, and BrokenPay.
+- [x] Simulate success, authentication failure, timeout, HTTP 500, HTTP 429, malformed response, slow response, duplicate request, and differing response formats.
+- [x] Provider boundary with deterministic contract tests and normalized outcomes.
+- [ ] Merge the reviewed `v3` work into `master` before beginning V4.
 
 ## V4 — Real integration concepts
 
 - [ ] API authentication and API keys; OAuth where it genuinely fits.
 - [ ] Webhooks, retries, idempotency, rate limiting, pagination, and data mapping/transformation.
-- [ ] Error normalization, timeout handling, and correlation IDs across the actual integration boundary.
+- [ ] Error normalization, timeout handling, and correlation IDs across an actual integration boundary.
 
 ## V5 — Production engineering
 

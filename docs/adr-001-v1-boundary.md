@@ -10,4 +10,4 @@ The first learning objective is a coherent Python API, validation, persistence, 
 
 ## Consequences
 
-The original planned V2 is the React/TypeScript frontend; provider adapters belong to V3 and real integration concerns to V4. A limited provider simulator was merged into `master` ahead of that plan and is deliberately preserved, but it does not change the roadmap or constitute completed V3 work. Alembic should replace `create_all` before shared deployment.
+The planned V2 is the React/TypeScript frontend. V3 introduces deterministic provider simulation; V4 will add real integration concepts. Alembic should replace `create_all` before shared deployment.

@@ -1,44 +1,46 @@
 # Integration Operations Hub
 
-Integration Operations Hub is a portfolio product for operating and troubleshooting external payment integrations. It is being built incrementally to demonstrate senior backend and integration thinking while developing hands-on Python, FastAPI, React, and TypeScript experience.
+Integration Operations Hub is a portfolio product for operating and troubleshooting external payment integrations. It is built incrementally to demonstrate senior backend and integration thinking while developing hands-on Python, FastAPI, React, and TypeScript experience.
 
-The canonical V1–V10 plan is in [TODO.md](./TODO.md). Read it before planning a new version: the project deliberately separates frontend work, provider simulation, real integration concerns, and production engineering.
+The canonical V1–V10 plan lives in [TODO.md](./TODO.md). Each new version starts from the current `master`; earlier working branches are preserved but never used as a base.
 
-## Current milestone: V2 React frontend
+## Current milestone: V3 integration simulation
 
-V2 adds a React/TypeScript operations console that consumes the live FastAPI API. It supports:
+V2's React/TypeScript console is now part of `master`; V3 extends its backend contract with a deliberate integration-simulation boundary. Five deterministic provider simulators emit incompatible raw responses, then adapters normalize the outcomes before the payment service persists them.
 
-- A dashboard with payment-status counts and recent payments.
-- Payment list, detail, failure context, and sanitized operation inspection.
-- Integration list and detail views.
-- Loading and API-error states.
-- Focused backend and frontend tests.
+| Provider | Default behavior | Success format |
+| --- | --- | --- |
+| AcmePay | Successful approval | JSON |
+| BancoX | Successful approval | Pipe-delimited text |
+| WalletPro | Authentication failure | JSON error |
+| SlowPay | Slow successful response | JSON |
+| BrokenPay | HTTP 500 failure | JSON error |
 
-The console uses local HTTP Basic authentication against the FastAPI API. It is intentionally a minimal learning boundary, configured through environment variables, not a production identity system.
-
-> A limited provider simulator is already present on `master` from earlier out-of-sequence work. It is preserved, but it is not treated as V2 or complete V3 functionality; see [TODO.md](./TODO.md).
+The simulation supports normal success, authentication failure, timeout, HTTP 500, HTTP 429, malformed response, slow response, duplicate request, and unsupported-provider behavior. It is deterministic and in-process for fast tests; V4 will introduce actual integration concerns without pretending this is a production provider client.
 
 ## Architecture
 
 ```text
 React + TypeScript (Vite)
         |
-        | HTTP / JSON
         v
 FastAPI application
+        |
+        v
+Payment service -> provider adapter -> deterministic provider simulator
         |
         v
 SQLAlchemy -> PostgreSQL
 ```
 
-The V2 frontend is intentionally a small client with local component state and a typed API boundary. V3 will deliberately expand the provider layer; V4 will add real integration concepts such as idempotency, retries, and authentication.
+The simulator emits raw HTTP-like status, body, and latency data. The adapter owns provider-format parsing and converts protocol failures into a common `NormalizedProviderError`. The payment service remains provider-agnostic and records normalized failure context in the operation log.
 
 ## API
 
 | Method | Path | Purpose |
 | --- | --- | --- |
 | GET | `/health` | Liveness check |
-| POST | `/payments` | Record a payment request |
+| POST | `/payments` | Record a payment request and run its selected simulation |
 | GET | `/payments` | List payment records for the operations console |
 | GET | `/payments/{payment_id}` | Retrieve a payment and refunds |
 | GET | `/payments/{payment_id}/operations` | Retrieve sanitized lifecycle context |
@@ -46,14 +48,25 @@ The V2 frontend is intentionally a small client with local component state and a
 | GET | `/integrations` | List integrations exposed by the backend |
 | GET | `/integrations/{integration_name}` | Retrieve integration details |
 
-The operation endpoint is a deliberately narrow UI-enabling contract, not the complete audit/request inspector planned for V7. It never exposes authorization secrets.
+For V3 testing, `POST /payments` accepts an optional `simulation_case` alongside `amount`, `currency`, and `provider`:
+
+```json
+{
+  "amount": "150.00",
+  "currency": "ARS",
+  "provider": "BrokenPay",
+  "simulation_case": "rate_limited"
+}
+```
+
+`simulation_case` is test control, not a real payment-provider request field. See [docs/v3-provider-simulation.md](./docs/v3-provider-simulation.md) for the full contract.
 
 ## Repository structure
 
 ```text
-app/        FastAPI application and domain implementation
+app/        FastAPI application, adapter layer, and provider simulators
 frontend/   React + TypeScript operations console
-tests/      Backend automated tests
+tests/      API, service, and provider-contract tests
 docs/       Architecture decisions and milestone documentation
 ```
 
@@ -70,9 +83,7 @@ $env:DATABASE_URL = "postgresql+psycopg://hub:hub@localhost:5432/integration_hub
 uvicorn app.main:app --reload
 ```
 
-For early learning, SQLite is supported with `DATABASE_URL=sqlite:///./integration_hub.db`. PostgreSQL is the intended local integration target.
-
-If an existing local SQLite database predates the provider fields currently on `master`, point `DATABASE_URL` to a new development file (for example, `sqlite:///./integration_hub_v2.db`). `create_all` does not alter existing tables; proper database migrations remain planned work.
+For early learning, SQLite is supported with `DATABASE_URL=sqlite:///./integration_hub.db`. If an existing local SQLite database predates the current schema, point `DATABASE_URL` to a fresh development file; `create_all` does not alter existing tables. Proper database migrations remain planned work.
 
 ### Frontend
 
@@ -97,4 +108,4 @@ npm run test
 npm run build
 ```
 
-See [docs/v2-frontend.md](./docs/v2-frontend.md) for the UI scope, API contract, and intentional boundaries.
+See [docs/v2-frontend.md](./docs/v2-frontend.md) for the UI scope and [docs/v3-provider-simulation.md](./docs/v3-provider-simulation.md) for the provider contract.
