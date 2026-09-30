@@ -9,12 +9,14 @@ Read this roadmap before planning or implementing a version. Map work to the pro
 - Explain meaningful trade-offs in .NET terms when useful, without reteaching basic engineering concepts.
 - Do not claim a technology is mastered simply because it appears in the repository.
 - New work begins by pulling `master` and creating a fresh branch from it. Preserve earlier working branches, but do not use them as a base.
+- End completed implementation work with verification, commit, push, and a pull request unless the user explicitly opts out.
 
 ## Current state
 
 - [x] V1 Python backend is merged into `master`: FastAPI, payment/refund models, REST endpoints, PostgreSQL Docker configuration, and automated tests.
 - [x] V2 React/TypeScript frontend is merged into `master`.
 - [x] V3 replaces the earlier limited simulator with the planned five-provider integration simulation and contract tests.
+- [x] V4 integration controls are implemented on `v4` and await review/merge.
 - [ ] PostgreSQL migrations, shared-database safety, and the V1 API/data-model review remain deliberate follow-up work.
 
 ## V1 — Python backend
@@ -34,13 +36,13 @@ Read this roadmap before planning or implementing a version. Map work to the pro
 - [x] Five fake providers: AcmePay, BancoX, WalletPro, SlowPay, and BrokenPay.
 - [x] Simulate success, authentication failure, timeout, HTTP 500, HTTP 429, malformed response, slow response, duplicate request, and differing response formats.
 - [x] Provider boundary with deterministic contract tests and normalized outcomes.
-- [ ] Merge the reviewed `v3` work into `master` before beginning V4.
 
 ## V4 — Real integration concepts
 
-- [ ] API authentication and API keys; OAuth where it genuinely fits.
-- [ ] Webhooks, retries, idempotency, rate limiting, pagination, and data mapping/transformation.
-- [ ] Error normalization, timeout handling, and correlation IDs across an actual integration boundary.
+- [x] Local operator authentication and integration API keys. OAuth is deferred until a real authorization-server integration exists.
+- [x] Authenticated webhook ingestion, manual retries, idempotency, fixed-window rate limiting, and offset pagination.
+- [x] Error normalization, configurable timeout enforcement, data-format mapping, and correlation-aware lifecycle logs.
+- [ ] Merge the reviewed `v4` work into `master` before beginning V5.
 
 ## V5 — Production engineering
 

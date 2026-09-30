@@ -49,6 +49,23 @@ def test_slowpay_preserves_slow_response_timing_without_waiting_in_tests():
     assert result.latency_ms == 1_500
 
 
+def test_provider_timeout_is_enforced_before_parsing_a_slow_response():
+    request = request_for(SimulationCase.SLOW_RESPONSE)
+    request = ProviderChargeRequest(
+        payment_id=request.payment_id,
+        amount=request.amount,
+        currency=request.currency,
+        correlation_id=request.correlation_id,
+        simulation_case=request.simulation_case,
+        timeout_ms=500,
+    )
+
+    with pytest.raises(NormalizedProviderError, match="configured integration timeout") as raised_error:
+        get_payment_provider("slowpay").charge(request)
+
+    assert raised_error.value.code == "provider_timeout"
+
+
 @pytest.mark.parametrize(
     ("provider_name", "simulation_case", "code", "retryable", "http_status"),
     [

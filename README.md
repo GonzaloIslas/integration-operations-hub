@@ -4,19 +4,20 @@ Integration Operations Hub is a portfolio product for operating and troubleshoot
 
 The canonical V1–V10 plan lives in [TODO.md](./TODO.md). Each new version starts from the current `master`; earlier working branches are preserved but never used as a base.
 
-## Current milestone: V3 integration simulation
+## Current milestone: V4 integration controls
 
-V2's React/TypeScript console is now part of `master`; V3 extends its backend contract with a deliberate integration-simulation boundary. Five deterministic provider simulators emit incompatible raw responses, then adapters normalize the outcomes before the payment service persists them.
+V4 adds a practical, synchronous integration-control layer on top of V3 provider simulations:
 
-| Provider | Default behavior | Success format |
-| --- | --- | --- |
-| AcmePay | Successful approval | JSON |
-| BancoX | Successful approval | Pipe-delimited text |
-| WalletPro | Authentication failure | JSON error |
-| SlowPay | Slow successful response | JSON |
-| BrokenPay | HTTP 500 failure | JSON error |
+- Local operator Basic authentication and integration API-key authentication.
+- Fixed-window per-principal rate limiting.
+- Idempotent payment creation with replay/conflict handling.
+- Offset pagination for operations queries.
+- Configurable provider timeout enforcement.
+- Manual retry for retryable failures.
+- Authenticated, idempotent webhook ingestion.
+- Correlation and normalized protocol context in lifecycle logs.
 
-The simulation supports normal success, authentication failure, timeout, HTTP 500, HTTP 429, malformed response, slow response, duplicate request, and unsupported-provider behavior. It is deterministic and in-process for fast tests; V4 will introduce actual integration concerns without pretending this is a production provider client.
+OAuth is intentionally deferred: there is no real authorization server or third-party OAuth flow to integrate yet. Adding a fake one would not demonstrate an integration concern honestly. Distributed rate limiting, automatic retries, and queue-backed webhook processing remain later production work.
 
 ## Architecture
 
@@ -24,49 +25,70 @@ The simulation supports normal success, authentication failure, timeout, HTTP 50
 React + TypeScript (Vite)
         |
         v
-FastAPI application
+FastAPI API -- Basic auth / API key -- rate limit
         |
         v
-Payment service -> provider adapter -> deterministic provider simulator
+Payment service -- idempotency / retry / webhook processing
+        |
+        v
+Provider adapter -> deterministic provider simulator
         |
         v
 SQLAlchemy -> PostgreSQL
 ```
 
-The simulator emits raw HTTP-like status, body, and latency data. The adapter owns provider-format parsing and converts protocol failures into a common `NormalizedProviderError`. The payment service remains provider-agnostic and records normalized failure context in the operation log.
+The provider adapter normalizes raw status, body, and latency results. The payment service records correlation-aware, operator-safe protocol context and applies idempotency/retry/webhook rules before persisting a lifecycle change.
 
 ## API
+
+All operations endpoints require either local HTTP Basic credentials or `X-API-Key`. The health endpoint remains public.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
 | GET | `/health` | Liveness check |
-| POST | `/payments` | Record a payment request and run its selected simulation |
-| GET | `/payments` | List payment records for the operations console |
+| POST | `/payments` | Create an idempotent payment request |
+| GET | `/payments?limit=&offset=` | List payments with offset pagination |
 | GET | `/payments/{payment_id}` | Retrieve a payment and refunds |
 | GET | `/payments/{payment_id}/operations` | Retrieve sanitized lifecycle context |
+| POST | `/payments/{payment_id}/retry` | Manually retry an eligible failed payment |
 | POST | `/payments/{payment_id}/refunds` | Create a validated refund |
-| GET | `/integrations` | List integrations exposed by the backend |
+| POST | `/webhooks/{provider}` | Ingest an idempotent provider webhook |
+| GET | `/integrations` | List integration definitions |
 | GET | `/integrations/{integration_name}` | Retrieve integration details |
 
-For V3 testing, `POST /payments` accepts an optional `simulation_case` alongside `amount`, `currency`, and `provider`:
+### Integration headers
 
-```json
-{
-  "amount": "150.00",
-  "currency": "ARS",
-  "provider": "BrokenPay",
-  "simulation_case": "rate_limited"
-}
-```
+| Header | Purpose |
+| --- | --- |
+| `X-API-Key` | Authenticates a service/provider client. |
+| `Idempotency-Key` | Makes repeated `POST /payments` calls replay safely. |
+| `X-Correlation-ID` | Propagates an operator-supplied trace identifier. |
 
-`simulation_case` is test control, not a real payment-provider request field. See [docs/v3-provider-simulation.md](./docs/v3-provider-simulation.md) for the full contract.
+`POST /payments` returns `Idempotency-Key`, `Idempotency-Replayed`, and `X-Correlation-ID`. Paginated payment lists return `X-Total-Count` and, when more data exists, `X-Next-Offset`.
+
+For V3/V4 exploration, `POST /payments` accepts an optional `simulation_case` test control. See [docs/v3-provider-simulation.md](./docs/v3-provider-simulation.md).
+
+## Local configuration
+
+These development-only defaults can be overridden by environment variables:
+
+| Setting | Default |
+| --- | --- |
+| `OPERATOR_USERNAME` | `operator` |
+| `OPERATOR_PASSWORD` | `local-development-only` |
+| `INTEGRATION_API_KEY` | `local-integration-api-key` |
+| `API_RATE_LIMIT` | `100` requests |
+| `API_RATE_WINDOW_SECONDS` | `60` seconds |
+| `PROVIDER_TIMEOUT_MS` | `2000` milliseconds |
+
+Do not use real production credentials in this configuration. V4 uses local development configuration to demonstrate the control boundaries; a production identity and secrets-management design belongs to later work.
 
 ## Repository structure
 
 ```text
-app/        FastAPI application, adapter layer, and provider simulators
+app/        FastAPI API, integration controls, adapter layer, and simulators
 frontend/   React + TypeScript operations console
-tests/      API, service, and provider-contract tests
+tests/      API, service, security, and provider-contract tests
 docs/       Architecture decisions and milestone documentation
 ```
 
@@ -83,7 +105,7 @@ $env:DATABASE_URL = "postgresql+psycopg://hub:hub@localhost:5432/integration_hub
 uvicorn app.main:app --reload
 ```
 
-For early learning, SQLite is supported with `DATABASE_URL=sqlite:///./integration_hub.db`. If an existing local SQLite database predates the current schema, point `DATABASE_URL` to a fresh development file; `create_all` does not alter existing tables. Proper database migrations remain planned work.
+For early learning, SQLite is supported with `DATABASE_URL=sqlite:///./integration_hub.db`. If an existing local SQLite database predates the current schema, point `DATABASE_URL` to a fresh development file; `create_all` does not alter existing tables. Proper migrations remain planned work.
 
 ### Frontend
 
@@ -95,9 +117,7 @@ npm install
 npm run dev
 ```
 
-The frontend expects the API at `http://127.0.0.1:8000` by default. Set `VITE_API_BASE_URL` to use another API location. The backend allows Vite's default origin through `FRONTEND_ORIGIN`, which defaults to `http://127.0.0.1:5173`.
-
-The default local operator is `operator`; set `OPERATOR_USERNAME` and `OPERATOR_PASSWORD` before starting FastAPI to use different development credentials. Do not use a real production password: this is a deliberately local Basic-auth milestone, not the production authentication design planned for V4.
+The frontend expects the API at `http://127.0.0.1:8000` by default. Set `VITE_API_BASE_URL` to use another API location.
 
 ## Verify
 
@@ -108,4 +128,4 @@ npm run test
 npm run build
 ```
 
-See [docs/v2-frontend.md](./docs/v2-frontend.md) for the UI scope and [docs/v3-provider-simulation.md](./docs/v3-provider-simulation.md) for the provider contract.
+See [docs/v2-frontend.md](./docs/v2-frontend.md), [docs/v3-provider-simulation.md](./docs/v3-provider-simulation.md), and [docs/v4-integration-controls.md](./docs/v4-integration-controls.md) for milestone details.

@@ -24,6 +24,7 @@ class ProviderChargeRequest:
     currency: str
     correlation_id: str
     simulation_case: SimulationCase | None = None
+    timeout_ms: int = 2_000
 
 
 @dataclass(frozen=True)
@@ -110,6 +111,15 @@ class SimulatedProvider:
 
     def charge(self, request: ProviderChargeRequest) -> ProviderPaymentResult:
         response = self.simulator.execute(self.definition, request)
+        if response.latency_ms > request.timeout_ms:
+            raise NormalizedProviderError(
+                "provider_timeout",
+                "The provider response exceeded the configured integration timeout.",
+                retryable=True,
+                http_status=response.status_code,
+                raw_response=response.body,
+                latency_ms=response.latency_ms,
+            )
         if response.status_code != 201:
             raise self._normalize_failure(response)
         try:
