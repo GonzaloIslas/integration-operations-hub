@@ -1,39 +1,51 @@
 import logging
-import secrets
 import uuid
 from collections.abc import Generator
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.database import Base, engine, get_session
 from app.providers import get_integration, list_integrations
-from app.schemas import IntegrationRead, OperationLogRead, PaymentCreate, PaymentRead, RefundCreate
+from app.schemas import (
+    IntegrationRead,
+    OperationLogRead,
+    PaymentCreate,
+    PaymentRead,
+    RefundCreate,
+    RetryCreate,
+    WebhookEventCreate,
+)
+from app.security import enforce_rate_limit
 from app.services import (
+    IdempotencyConflictError,
     InvalidRefundError,
+    InvalidRetryError,
+    InvalidWebhookError,
     PaymentNotFoundError,
     create_payment,
     create_refund,
     get_payment,
     get_payment_operations,
     list_payments,
+    process_webhook,
+    retry_payment,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Integration Operations Hub", version="0.1.0")
+app = FastAPI(title="Integration Operations Hub", version="0.0.4")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[get_settings().frontend_origin],
     allow_credentials=False,
     allow_methods=["GET", "POST"],
-    allow_headers=["Authorization", "Content-Type", "X-Correlation-ID"],
+    allow_headers=["Authorization", "Content-Type", "Idempotency-Key", "X-API-Key", "X-Correlation-ID"],
+    expose_headers=["Idempotency-Key", "Idempotency-Replayed", "X-Next-Offset", "X-RateLimit-Remaining"],
 )
-operator_security = HTTPBasic()
 
 
 @app.on_event("startup")
@@ -45,15 +57,6 @@ def database_session() -> Generator[Session, None, None]:
     yield from get_session()
 
 
-def require_operator(credentials: HTTPBasicCredentials = Depends(operator_security)) -> str:
-    settings = get_settings()
-    has_valid_username = secrets.compare_digest(credentials.username, settings.operator_username)
-    has_valid_password = secrets.compare_digest(credentials.password, settings.operator_password)
-    if not (has_valid_username and has_valid_password):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid operator credentials.")
-    return credentials.username
-
-
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -63,27 +66,51 @@ def health() -> dict[str, str]:
     "/payments",
     response_model=PaymentRead,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_operator)],
+    dependencies=[Depends(enforce_rate_limit)],
 )
 def post_payment(
     payload: PaymentCreate,
     response: Response,
     x_correlation_id: str | None = Header(default=None),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     session: Session = Depends(database_session),
 ) -> PaymentRead:
     correlation_id = x_correlation_id or str(uuid.uuid4())
-    response.headers["X-Correlation-ID"] = correlation_id
-    payment = create_payment(session, payload, correlation_id)
-    logger.info("payment.created payment_id=%s correlation_id=%s", payment.id, correlation_id)
+    effective_idempotency_key = idempotency_key or f"generated:{correlation_id}"
+    try:
+        payment, replayed = create_payment(session, payload, correlation_id, effective_idempotency_key)
+    except IdempotencyConflictError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+
+    response.headers["X-Correlation-ID"] = payment.correlation_id
+    response.headers["Idempotency-Key"] = effective_idempotency_key
+    response.headers["Idempotency-Replayed"] = str(replayed).lower()
+    if replayed:
+        response.status_code = status.HTTP_200_OK
+    logger.info(
+        "payment.created payment_id=%s correlation_id=%s idempotency_replayed=%s",
+        payment.id,
+        payment.correlation_id,
+        replayed,
+    )
     return PaymentRead.model_validate(payment)
 
 
-@app.get("/payments", response_model=list[PaymentRead], dependencies=[Depends(require_operator)])
-def read_payments(session: Session = Depends(database_session)) -> list[PaymentRead]:
-    return [PaymentRead.model_validate(payment) for payment in list_payments(session)]
+@app.get("/payments", response_model=list[PaymentRead], dependencies=[Depends(enforce_rate_limit)])
+def read_payments(
+    response: Response,
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    session: Session = Depends(database_session),
+) -> list[PaymentRead]:
+    payments, total = list_payments(session, limit, offset)
+    response.headers["X-Total-Count"] = str(total)
+    if offset + len(payments) < total:
+        response.headers["X-Next-Offset"] = str(offset + len(payments))
+    return [PaymentRead.model_validate(payment) for payment in payments]
 
 
-@app.get("/payments/{payment_id}", response_model=PaymentRead, dependencies=[Depends(require_operator)])
+@app.get("/payments/{payment_id}", response_model=PaymentRead, dependencies=[Depends(enforce_rate_limit)])
 def read_payment(payment_id: uuid.UUID, session: Session = Depends(database_session)) -> PaymentRead:
     try:
         return PaymentRead.model_validate(get_payment(session, payment_id))
@@ -94,7 +121,7 @@ def read_payment(payment_id: uuid.UUID, session: Session = Depends(database_sess
 @app.get(
     "/payments/{payment_id}/operations",
     response_model=list[OperationLogRead],
-    dependencies=[Depends(require_operator)],
+    dependencies=[Depends(enforce_rate_limit)],
 )
 def read_payment_operations(
     payment_id: uuid.UUID, session: Session = Depends(database_session)
@@ -106,10 +133,28 @@ def read_payment_operations(
 
 
 @app.post(
+    "/payments/{payment_id}/retry",
+    response_model=PaymentRead,
+    dependencies=[Depends(enforce_rate_limit)],
+)
+def post_payment_retry(
+    payment_id: uuid.UUID,
+    payload: RetryCreate,
+    session: Session = Depends(database_session),
+) -> PaymentRead:
+    try:
+        return PaymentRead.model_validate(retry_payment(session, payment_id, payload))
+    except PaymentNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Payment not found.") from error
+    except InvalidRetryError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+
+
+@app.post(
     "/payments/{payment_id}/refunds",
     response_model=PaymentRead,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_operator)],
+    dependencies=[Depends(enforce_rate_limit)],
 )
 def post_refund(
     payment_id: uuid.UUID, payload: RefundCreate, session: Session = Depends(database_session)
@@ -122,13 +167,34 @@ def post_refund(
         raise HTTPException(status_code=409, detail=str(error)) from error
 
 
-@app.get("/integrations", response_model=list[IntegrationRead], dependencies=[Depends(require_operator)])
+@app.post(
+    "/webhooks/{provider}",
+    response_model=PaymentRead,
+    dependencies=[Depends(enforce_rate_limit)],
+)
+def post_webhook(
+    provider: str,
+    payload: WebhookEventCreate,
+    response: Response,
+    session: Session = Depends(database_session),
+) -> PaymentRead:
+    try:
+        payment, replayed = process_webhook(session, provider, payload)
+    except PaymentNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Payment not found.") from error
+    except InvalidWebhookError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+    response.headers["Idempotency-Replayed"] = str(replayed).lower()
+    return PaymentRead.model_validate(payment)
+
+
+@app.get("/integrations", response_model=list[IntegrationRead], dependencies=[Depends(enforce_rate_limit)])
 def read_integrations() -> list[IntegrationRead]:
     return [IntegrationRead.model_validate(integration) for integration in list_integrations()]
 
 
 @app.get(
-    "/integrations/{integration_name}", response_model=IntegrationRead, dependencies=[Depends(require_operator)]
+    "/integrations/{integration_name}", response_model=IntegrationRead, dependencies=[Depends(enforce_rate_limit)]
 )
 def read_integration(integration_name: str) -> IntegrationRead:
     integration = get_integration(integration_name)

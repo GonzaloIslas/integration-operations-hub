@@ -26,11 +26,13 @@ def session() -> Session:
 
 
 def _create_payment(session: Session):
-    return create_payment(
+    payment, _ = create_payment(
         session,
         PaymentCreate(amount=Decimal("50.00"), currency="USD", provider="AcmePay"),
         "service-test-correlation-id",
+        "service-test-idempotency-key",
     )
+    return payment
 
 
 def test_create_payment_persists_payment_and_lifecycle_log(session: Session):
@@ -77,7 +79,7 @@ def test_refund_cannot_exceed_payment_when_existing_refund_is_pending(session: S
 
 
 def test_provider_failure_is_persisted_as_a_normalized_operation_log(session: Session):
-    payment = create_payment(
+    payment, _ = create_payment(
         session,
         PaymentCreate(
             amount=Decimal("50.00"),
@@ -86,6 +88,7 @@ def test_provider_failure_is_persisted_as_a_normalized_operation_log(session: Se
             simulation_case="timeout",
         ),
         "provider-failure-correlation-id",
+        "provider-failure-idempotency-key",
     )
     failure_log = session.scalar(
         select(OperationLog).where(
@@ -101,7 +104,7 @@ def test_provider_failure_is_persisted_as_a_normalized_operation_log(session: Se
 
 
 def test_provider_log_preserves_sanitized_protocol_context(session: Session):
-    payment = create_payment(
+    payment, _ = create_payment(
         session,
         PaymentCreate(
             amount=Decimal("50.00"),
@@ -110,6 +113,7 @@ def test_provider_log_preserves_sanitized_protocol_context(session: Session):
             simulation_case="rate_limited",
         ),
         "rate-limit-correlation-id",
+        "rate-limit-idempotency-key",
     )
     failure_log = session.scalar(
         select(OperationLog).where(

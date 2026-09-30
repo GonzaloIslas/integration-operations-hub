@@ -1,4 +1,5 @@
 import uuid
+from typing import Any, Literal
 from datetime import datetime
 from decimal import Decimal
 
@@ -17,6 +18,18 @@ class PaymentCreate(BaseModel):
 
 class RefundCreate(BaseModel):
     amount: Decimal = Field(gt=0, max_digits=12, decimal_places=2)
+
+
+class RetryCreate(BaseModel):
+    simulation_case: SimulationCase = SimulationCase.NORMAL
+
+
+class WebhookEventCreate(BaseModel):
+    event_id: str = Field(min_length=1, max_length=128)
+    payment_id: uuid.UUID
+    event_type: Literal["payment.succeeded", "payment.failed"]
+    provider_reference: str | None = Field(default=None, max_length=128)
+    payload: dict[str, Any] = Field(default_factory=dict)
 
 
 class RefundRead(BaseModel):

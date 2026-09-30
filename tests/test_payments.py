@@ -150,6 +150,95 @@ def test_payment_uses_a_generated_correlation_id_when_header_is_missing():
     assert uuid.UUID(response.json()["correlation_id"])
 
 
+def test_payment_creation_is_idempotent_for_the_same_request():
+    payload = {"amount": "20.00", "currency": "USD", "provider": "AcmePay"}
+    headers = {"Idempotency-Key": "payment-create-42"}
+
+    created = client.post("/payments", headers=headers, json=payload)
+    replayed = client.post("/payments", headers=headers, json=payload)
+    operations = client.get(f"/payments/{created.json()['id']}/operations")
+
+    assert created.status_code == 201
+    assert replayed.status_code == 200
+    assert replayed.headers["Idempotency-Replayed"] == "true"
+    assert replayed.json()["id"] == created.json()["id"]
+    assert [operation["event_type"] for operation in operations.json()] == [
+        "payment.created",
+        "payment.provider_succeeded",
+    ]
+
+
+def test_idempotency_key_cannot_be_reused_for_a_different_request():
+    headers = {"Idempotency-Key": "payment-create-conflict"}
+    client.post("/payments", headers=headers, json={"amount": "20.00", "currency": "USD", "provider": "AcmePay"})
+
+    conflict = client.post(
+        "/payments",
+        headers=headers,
+        json={"amount": "21.00", "currency": "USD", "provider": "AcmePay"},
+    )
+
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"] == "Idempotency key was already used with a different payment request."
+
+
+def test_payment_list_supports_offset_pagination():
+    for amount in ("10.00", "20.00", "30.00"):
+        client.post("/payments", json={"amount": amount, "currency": "USD", "provider": "AcmePay"})
+
+    first_page = client.get("/payments?limit=2&offset=0")
+    second_page = client.get("/payments?limit=2&offset=2")
+
+    assert len(first_page.json()) == 2
+    assert first_page.headers["X-Total-Count"] == "3"
+    assert first_page.headers["X-Next-Offset"] == "2"
+    assert len(second_page.json()) == 1
+    assert "X-Next-Offset" not in second_page.headers
+
+
+def test_integration_api_key_authenticates_a_service_client():
+    response = TestClient(app, headers={"X-API-Key": "local-integration-api-key"}).get("/integrations")
+
+    assert response.status_code == 200
+    assert response.headers["X-RateLimit-Remaining"]
+
+
+def test_manual_retry_can_recover_a_retryable_provider_failure():
+    created = client.post(
+        "/payments",
+        json={"amount": "25.00", "currency": "USD", "provider": "BrokenPay"},
+    )
+
+    retried = client.post(f"/payments/{created.json()['id']}/retry", json={"simulation_case": "normal"})
+
+    assert created.json()["failure_code"] == "provider_unavailable"
+    assert retried.status_code == 200
+    assert retried.json()["status"] == "succeeded"
+
+
+def test_webhook_is_authenticated_idempotent_and_updates_payment_status():
+    payment = client.post(
+        "/payments",
+        json={"amount": "25.00", "currency": "USD", "provider": "BrokenPay"},
+    )
+    webhook_client = TestClient(app, headers={"X-API-Key": "local-integration-api-key"})
+    payload = {
+        "event_id": "brokenpay-event-42",
+        "payment_id": payment.json()["id"],
+        "event_type": "payment.succeeded",
+        "provider_reference": "brokenpay-reconciled-42",
+        "payload": {"source": "provider"},
+    }
+
+    delivered = webhook_client.post("/webhooks/brokenpay", json=payload)
+    replayed = webhook_client.post("/webhooks/brokenpay", json=payload)
+
+    assert delivered.status_code == 200
+    assert delivered.json()["status"] == "succeeded"
+    assert delivered.json()["provider_reference"] == "brokenpay-reconciled-42"
+    assert replayed.headers["Idempotency-Replayed"] == "true"
+
+
 def test_unknown_payment_and_refund_requests_return_not_found():
     payment_id = uuid.uuid4()
 

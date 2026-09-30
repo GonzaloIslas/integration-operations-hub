@@ -3,7 +3,7 @@ from datetime import datetime
 from decimal import Decimal
 from enum import StrEnum
 
-from sqlalchemy import DateTime, ForeignKey, Numeric, String, Text, func
+from sqlalchemy import DateTime, ForeignKey, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -31,6 +31,8 @@ class Payment(Base):
     provider: Mapped[str] = mapped_column(String(100), nullable=False)
     status: Mapped[PaymentStatus] = mapped_column(String(20), default=PaymentStatus.PENDING)
     correlation_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    simulation_case: Mapped[str | None] = mapped_column(String(32))
     provider_reference: Mapped[str | None] = mapped_column(String(128))
     failure_code: Mapped[str | None] = mapped_column(String(64))
     failure_message: Mapped[str | None] = mapped_column(Text)
@@ -59,3 +61,16 @@ class OperationLog(Base):
     event_type: Mapped[str] = mapped_column(String(64), nullable=False)
     detail: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class WebhookEvent(Base):
+    __tablename__ = "webhook_events"
+    __table_args__ = (UniqueConstraint("provider", "event_id", name="uq_webhook_events_provider_event_id"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    provider: Mapped[str] = mapped_column(String(100), nullable=False)
+    event_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    payment_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("payments.id"), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    payload: Mapped[str] = mapped_column(Text, nullable=False)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
