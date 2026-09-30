@@ -4,6 +4,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    application_name: str = "integration-operations-hub"
+    application_environment: str = "development"
+    log_level: str = "INFO"
     database_url: str = "sqlite:///./integration_hub.db"
     frontend_origin: str = "http://127.0.0.1:5173"
     operator_username: str = "operator"

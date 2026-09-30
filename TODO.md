@@ -16,7 +16,8 @@ Read this roadmap before planning or implementing a version. Map work to the pro
 - [x] V1 Python backend is merged into `master`: FastAPI, payment/refund models, REST endpoints, PostgreSQL Docker configuration, and automated tests.
 - [x] V2 React/TypeScript frontend is merged into `master`.
 - [x] V3 replaces the earlier limited simulator with the planned five-provider integration simulation and contract tests.
-- [x] V4 integration controls are implemented on `v4` and await review/merge.
+- [x] V4 integration controls are merged into `master`.
+- [x] V5 production engineering is implemented on `v5` and awaits review/merge.
 - [ ] PostgreSQL migrations, shared-database safety, and the V1 API/data-model review remain deliberate follow-up work.
 
 ## V1 — Python backend
@@ -46,9 +47,11 @@ Read this roadmap before planning or implementing a version. Map work to the pro
 
 ## V5 — Production engineering
 
-- [ ] Docker/Docker Compose, structured logging, metrics, configuration, and health checks.
-- [ ] CI/CD, Redis/RabbitMQ/background workers only where they solve a demonstrated need.
-- [ ] Integration and system tests; production-style deployment and troubleshooting configuration.
+- [x] Docker/Docker Compose, structured logging, metrics, configuration, and liveness/readiness checks.
+- [x] GitHub Actions CI for backend/frontend verification.
+- [x] Integration/system workflow tests and production-style deployment configuration.
+- [ ] Redis/RabbitMQ/background workers remain deferred until asynchronous processing is needed in V8.
+- [ ] Merge the reviewed `v5` work into `master` before beginning V6.
 
 ## V6 — Operational dashboard
 
