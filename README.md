@@ -1,46 +1,65 @@
 # Integration Operations Hub
 
-An operations-focused sandbox for payment integrations. It records payment attempts and refunds in a way that will later support provider health, request inspection, normalized failures, and retries.
+Integration Operations Hub is a portfolio product for operating and troubleshooting external payment integrations. It is being built incrementally to demonstrate senior backend and integration thinking while developing hands-on Python, FastAPI, React, and TypeScript experience.
 
-## V2 design
+The canonical V1–V10 plan is in [TODO.md](./TODO.md). Read it before planning a new version: the project deliberately separates frontend work, provider simulation, real integration concerns, and production engineering.
 
-**Product definition.** A backend API for an operator to create, look up, and refund payments while preserving the operational context needed to investigate an integration outcome.
+## Current milestone: V2 React frontend
 
-**Scope.** One FastAPI service, PostgreSQL persistence, payment/refund lifecycle validation, correlation IDs, structured application logs, health checks, deterministic provider simulators, normalized provider failures, and automated tests. V2 still excludes real provider credentials, auth, queues, retries, webhooks, and React.
+V2 adds a React/TypeScript operations console that consumes the live FastAPI API. It supports:
 
-**Architecture.** `HTTP API -> application service -> provider adapter -> SQLAlchemy repository/model -> PostgreSQL`. FastAPI owns HTTP concerns; the service owns state transitions. V2's deterministic adapter makes provider outcomes testable before real clients are introduced.
+- A dashboard with payment-status counts and recent payments.
+- Payment list, detail, failure context, and sanitized operation inspection.
+- Integration list and detail views.
+- Loading and API-error states.
+- Focused backend and frontend tests.
 
-**Technology choices.** Python 3.12, FastAPI, Pydantic v2, SQLAlchemy 2, PostgreSQL/psycopg, pytest, and Docker Compose. SQLAlchemy is deliberately used synchronously in V1: it makes the transaction boundary clear before async I/O becomes necessary for provider clients.
+The console uses local HTTP Basic authentication against the FastAPI API. It is intentionally a minimal learning boundary, configured through environment variables, not a production identity system.
 
-**Repository structure.**
+> A limited provider simulator is already present on `master` from earlier out-of-sequence work. It is preserved, but it is not treated as V2 or complete V3 functionality; see [TODO.md](./TODO.md).
 
+## Architecture
+
+```text
+React + TypeScript (Vite)
+        |
+        | HTTP / JSON
+        v
+FastAPI application
+        |
+        v
+SQLAlchemy -> PostgreSQL
 ```
-app/             FastAPI application and domain implementation
-tests/           HTTP-level automated tests
-docs/            architecture decisions and operating notes
-docker-compose.yml  local PostgreSQL
-```
 
-**Database model.** `payments` holds amount, currency, provider name, status, correlation ID, provider reference, normalized failure data, and timestamps. `refunds` belongs to a payment, carries an amount and status, and makes partial-refund validation explicit. `operation_logs` records payment and provider lifecycle events.
+The V2 frontend is intentionally a small client with local component state and a typed API boundary. V3 will deliberately expand the provider layer; V4 will add real integration concepts such as idempotency, retries, and authentication.
 
-**Initial API.**
+## API
 
 | Method | Path | Purpose |
 | --- | --- | --- |
 | GET | `/health` | Liveness check |
 | POST | `/payments` | Record a payment request |
-| GET | `/payments/{payment_id}` | Retrieve payment and refunds |
+| GET | `/payments` | List payment records for the operations console |
+| GET | `/payments/{payment_id}` | Retrieve a payment and refunds |
+| GET | `/payments/{payment_id}/operations` | Retrieve sanitized lifecycle context |
 | POST | `/payments/{payment_id}/refunds` | Create a validated refund |
+| GET | `/integrations` | List integrations exposed by the backend |
+| GET | `/integrations/{integration_name}` | Retrieve integration details |
 
-`AcmePay` simulates a successful payment, `DeclinePay` simulates a permanent card decline, and `TimeoutPay` simulates a retryable provider timeout. Unknown provider names are normalized as unsupported-provider failures.
+The operation endpoint is a deliberately narrow UI-enabling contract, not the complete audit/request inspector planned for V7. It never exposes authorization secrets.
 
-**Milestones.** (1) payment/refund domain/API/tests; (2) provider simulators and normalized errors; (3) React operations UI; (4) async retries and messaging; (5) observability, deployment, and operational dashboard.
+## Repository structure
 
-**Minimum Python before starting.** Type hints and `dataclass`/Pydantic-style models; modules and imports; exceptions; context managers (`with`); virtual environments and packages; and `async def` only at the FastAPI boundary for now. The closest .NET analogy: Pydantic request models are DTOs with runtime validation, and FastAPI dependency injection is lightweight parameter-based DI.
-
-**React/TypeScript later.** Type aliases/interfaces, components and props, `useState`/`useEffect`, controlled forms, fetching/loading/error states, routing, and table composition. Treat components as focused views: state and API access should not diffuse across the UI.
+```text
+app/        FastAPI application and domain implementation
+frontend/   React + TypeScript operations console
+tests/      Backend automated tests
+docs/       Architecture decisions and milestone documentation
+```
 
 ## Run locally
+
+### Backend
 
 ```powershell
 python -m venv .venv
@@ -51,6 +70,31 @@ $env:DATABASE_URL = "postgresql+psycopg://hub:hub@localhost:5432/integration_hub
 uvicorn app.main:app --reload
 ```
 
-Open `http://127.0.0.1:8000/docs`. Run tests with `pytest`.
+For early learning, SQLite is supported with `DATABASE_URL=sqlite:///./integration_hub.db`. PostgreSQL is the intended local integration target.
 
-For early learning, SQLite is supported by setting `DATABASE_URL=sqlite:///./integration_hub.db`; production-like local work should use the compose PostgreSQL service.
+If an existing local SQLite database predates the provider fields currently on `master`, point `DATABASE_URL` to a new development file (for example, `sqlite:///./integration_hub_v2.db`). `create_all` does not alter existing tables; proper database migrations remain planned work.
+
+### Frontend
+
+In a separate terminal, with the API running:
+
+```powershell
+cd frontend
+npm install
+npm run dev
+```
+
+The frontend expects the API at `http://127.0.0.1:8000` by default. Set `VITE_API_BASE_URL` to use another API location. The backend allows Vite's default origin through `FRONTEND_ORIGIN`, which defaults to `http://127.0.0.1:5173`.
+
+The default local operator is `operator`; set `OPERATOR_USERNAME` and `OPERATOR_PASSWORD` before starting FastAPI to use different development credentials. Do not use a real production password: this is a deliberately local Basic-auth milestone, not the production authentication design planned for V4.
+
+## Verify
+
+```powershell
+python -m pytest -q
+cd frontend
+npm run test
+npm run build
+```
+
+See [docs/v2-frontend.md](./docs/v2-frontend.md) for the UI scope, API contract, and intentional boundaries.

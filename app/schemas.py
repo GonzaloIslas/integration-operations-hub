@@ -40,3 +40,19 @@ class PaymentRead(BaseModel):
     created_at: datetime
     updated_at: datetime
     refunds: list[RefundRead] = []
+
+
+class OperationLogRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    event_type: str
+    detail: str | None
+    created_at: datetime
+
+
+class IntegrationRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    name: str
+    display_name: str
+    description: str
+    is_simulated: bool = True

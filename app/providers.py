@@ -9,6 +9,20 @@ class ProviderPaymentResult:
     reference: str
 
 
+@dataclass(frozen=True)
+class IntegrationDefinition:
+    name: str
+    display_name: str
+    description: str
+
+
+INTEGRATIONS = (
+    IntegrationDefinition("acmepay", "AcmePay", "Deterministic successful-payment simulator."),
+    IntegrationDefinition("declinepay", "DeclinePay", "Deterministic permanent-decline simulator."),
+    IntegrationDefinition("timeoutpay", "TimeoutPay", "Deterministic retryable-timeout simulator."),
+)
+
+
 class NormalizedProviderError(Exception):
     def __init__(self, code: str, message: str, retryable: bool) -> None:
         self.code = code
@@ -41,3 +55,12 @@ class SimulatedProvider:
 
 def get_payment_provider(name: str) -> PaymentProvider:
     return SimulatedProvider(name)
+
+
+def list_integrations() -> tuple[IntegrationDefinition, ...]:
+    return INTEGRATIONS
+
+
+def get_integration(name: str) -> IntegrationDefinition | None:
+    normalized_name = name.lower()
+    return next((integration for integration in INTEGRATIONS if integration.name == normalized_name), None)

@@ -22,7 +22,20 @@ def create_payment(session: Session, request: PaymentCreate, correlation_id: str
     payment = Payment(**request.model_dump(), correlation_id=correlation_id)
     session.add(payment)
     session.flush()
-    session.add(OperationLog(payment_id=payment.id, event_type="payment.created"))
+    session.add(
+        OperationLog(
+            payment_id=payment.id,
+            event_type="payment.created",
+            detail=json.dumps(
+                {
+                    "amount": str(request.amount),
+                    "currency": request.currency,
+                    "provider": request.provider,
+                    "correlation_id": correlation_id,
+                }
+            ),
+        )
+    )
     try:
         result = get_payment_provider(request.provider).charge(payment.id, payment.amount, payment.currency)
         payment.status = PaymentStatus.SUCCEEDED
@@ -61,6 +74,17 @@ def get_payment(session: Session, payment_id: uuid.UUID) -> Payment:
     return payment
 
 
+def list_payments(session: Session) -> list[Payment]:
+    statement = select(Payment).options(selectinload(Payment.refunds)).order_by(Payment.created_at.desc(), Payment.id.desc())
+    return list(session.scalars(statement))
+
+
+def get_payment_operations(session: Session, payment_id: uuid.UUID) -> list[OperationLog]:
+    get_payment(session, payment_id)
+    statement = select(OperationLog).where(OperationLog.payment_id == payment_id).order_by(OperationLog.created_at.asc())
+    return list(session.scalars(statement))
+
+
 def create_refund(session: Session, payment_id: uuid.UUID, request: RefundCreate) -> Payment:
     payment = get_payment(session, payment_id)
     if payment.status not in {PaymentStatus.SUCCEEDED, PaymentStatus.REFUNDED}:
@@ -77,7 +101,13 @@ def create_refund(session: Session, payment_id: uuid.UUID, request: RefundCreate
     refund = Refund(payment_id=payment.id, amount=request.amount, status=RefundStatus.SUCCEEDED)
     session.add(refund)
     session.flush()
-    session.add(OperationLog(payment_id=payment.id, event_type="refund.provider_succeeded"))
+    session.add(
+        OperationLog(
+            payment_id=payment.id,
+            event_type="refund.provider_succeeded",
+            detail=json.dumps({"amount": str(request.amount), "status": RefundStatus.SUCCEEDED}),
+        )
+    )
     if Decimal(refunded_amount) + request.amount == payment.amount:
         payment.status = PaymentStatus.REFUNDED
     session.commit()

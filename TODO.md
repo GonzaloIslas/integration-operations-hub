@@ -1,31 +1,82 @@
-# Project TODO
+# Integration Operations Hub — Canonical Project Plan
 
-This list reflects the remaining product work described in the V1 design and its planned milestones. Items marked complete are covered by the repository's automated tests; unmarked items are not implemented yet.
+This file is the implementation checklist derived from the original project brief. Read it before proposing, planning, or implementing work. Do not infer a version's scope from a branch name or from a terse request such as “V2”; confirm it against this plan first.
 
-## V1 completion
+## Project guardrails
 
-- [x] Create and retrieve payments, including correlation-ID propagation.
-- [x] Validate payment and refund request payloads.
-- [x] Enforce the refundable-balance rule and record payment/refund lifecycle events.
-- [x] Provide a liveness endpoint.
-- [x] Simulate provider confirmations and normalized provider failures, including retryability.
-- [x] Transition successful payments to `succeeded` and fully refunded payments to `refunded`.
-- [ ] Make operation logs a complete, immutable request-inspection audit trail (request context, normalized response/error, actor, and timestamps).
-- [ ] Add database migrations and constraints/indexes appropriate for PostgreSQL; table creation at application startup is not a migration strategy.
-- [ ] Add structured logging coverage, error handling for database failures, and a readiness check that verifies database connectivity.
-- [ ] Add CI to install the project and run the pytest suite on a supported Python version.
+- Build a realistic integration-operations product incrementally; do not turn it into an architecture exercise.
+- Treat the user as a senior .NET engineer learning Python and React, not as a beginner programmer.
+- Explain Python/React trade-offs in .NET terms when useful, without reteaching basic engineering concepts.
+- Do not claim a technology is mastered simply because it appears in the repository.
+- Do not silently alter the agreed version scope. When a request is ambiguous, identify the mapped roadmap step before implementation.
 
-## Later milestones
+## Current state and required correction
 
-- [ ] Replace deterministic provider simulators with real provider adapters and provider-specific contract tests.
-- [ ] Authentication and authorization for operator actions.
-- [ ] React operations UI for payment lookup, inspection, and refunds.
-- [ ] Webhook ingestion, idempotency handling, retries, queues, and asynchronous processing.
-- [ ] Metrics, tracing, dashboards, alerts, deployment configuration, and operational runbooks.
+- [x] V1 backend foundation is on `master`: FastAPI, payment/refund models, REST endpoints, PostgreSQL Docker configuration, and tests.
+- [x] The prior `v2` provider-simulation work was merged into `master` and is preserved as requested.
+- [ ] Do not present that provider work as true V2 or as complete V3. It is an out-of-sequence, limited implementation that needs deliberate V3 review later.
+- [ ] Review V1 against the brief before calling it complete: PostgreSQL migrations, test strategy, and API shape still need deliberate decisions.
 
-## Test backlog
+## V1 — Python backend
 
-- [ ] PostgreSQL integration tests, including migrations and decimal precision behavior.
-- [ ] Concurrent-refund tests to prove the refundable balance cannot be overspent under parallel requests.
-- [ ] API tests for the future status-transition and audit-inspection endpoints.
-- [ ] Provider adapter contract tests and end-to-end workflow tests once integrations exist.
+- [x] FastAPI backend, basic models, REST API, and automated tests.
+- [x] Health endpoint and Docker Compose PostgreSQL configuration.
+- [ ] Validate the initial API and data-model decisions against the product requirements; keep V1 small and useful.
+- [ ] Document the V1 architecture, data model, API behavior, and testing decisions.
+
+## V2 — React / TypeScript frontend
+
+- [x] Create a React + TypeScript application that consumes the real FastAPI API.
+- [x] Dashboard view.
+- [x] Payments list and payment-details views.
+- [x] Integration list and integration-details views.
+- [x] Sanitized operation inspection UI for payment request and provider-result context.
+- [x] Loading, validation, and error states.
+- [x] Local operator authentication using the real backend contract; production identity remains V4 work.
+- [x] Add focused frontend tests and document the frontend structure.
+
+## V3 — Integration simulation
+
+- [ ] Review the limited simulator code already on `master`, then expand or replace it intentionally.
+- [ ] Build fake providers: AcmePay, BancoX, WalletPro, SlowPay, and BrokenPay.
+- [ ] Model realistic outcomes: success, authentication failure, timeout, HTTP 500, HTTP 429, malformed response, slow response, duplicate request, and differing response formats.
+- [ ] Add an integration layer and provider-focused contract tests.
+
+## V4 — Real integration concepts
+
+- [ ] API authentication and API keys; OAuth where it genuinely fits.
+- [ ] Webhooks, retries, idempotency, rate limiting, pagination, and data mapping/transformation.
+- [ ] Error normalization, timeout handling, and correlation IDs across the actual integration boundary.
+
+## V5 — Production engineering
+
+- [ ] Docker/Docker Compose, structured logging, metrics, configuration, and health checks.
+- [ ] CI/CD, Redis/RabbitMQ/background workers only where they solve a demonstrated need.
+- [ ] Integration and system tests; production-style deployment and troubleshooting configuration.
+
+## V6 — Operational dashboard
+
+- [ ] Provider health, success/error rate, request latency, recent requests/failures, payment status, and retry status.
+
+## V7 — Request inspector
+
+- [ ] Show sanitized request headers/body and response status/body for an integration operation.
+- [ ] Preserve enough context to troubleshoot failures without exposing secrets.
+
+## V8 — Retry and asynchronous processing
+
+- [ ] Introduce RabbitMQ, workers, retry policies, backoff, idempotency, and dead-letter behavior only after the synchronous integration flow is solid.
+
+## V9 — Documentation and runbook
+
+- [ ] Product overview, requirements, assumptions, architecture, API, data model, integration mapping, failure scenarios, deployment, troubleshooting, testing strategy, and ADRs.
+- [ ] Make the README demonstrate relevant senior backend, integration, and full-stack project experience honestly.
+
+## V10 — AI / Integration Copilot
+
+- [ ] Only after the operational core works, add a grounded assistant for investigating real integration failures.
+- [ ] Use retrieved requests, responses, logs, provider documentation, and prior incidents; do not build a generic chat wrapper.
+
+## Optional .NET interoperability
+
+- [ ] Consider a small .NET service only after the Python product is solid and only when it demonstrates a meaningful interoperability concern.
