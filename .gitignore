@@ -1,8 +1,11 @@
 .venv/
 .python313/
+.node/
 __pycache__/
 .pytest_cache/
 *.egg-info/
+frontend/node_modules/
+frontend/dist/
 *.py[cod]
 *.db
 .env

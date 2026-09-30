@@ -1,3 +1,4 @@
+import base64
 import uuid
 
 from fastapi.testclient import TestClient
@@ -23,7 +24,8 @@ def override_session():
 
 
 app.dependency_overrides[database_session] = override_session
-client = TestClient(app)
+operator_token = base64.b64encode(b"operator:local-development-only").decode()
+client = TestClient(app, headers={"Authorization": f"Basic {operator_token}"})
 
 
 def setup_function():
@@ -45,6 +47,35 @@ def test_create_and_read_payment_preserves_correlation_id():
     assert found.status_code == 200
     assert found.json()["correlation_id"] == "payment-42"
     assert found.json()["status"] == "succeeded"
+
+
+def test_payment_list_and_operations_expose_operator_context():
+    created = client.post(
+        "/payments",
+        headers={"X-Correlation-ID": "operator-context-42"},
+        json={"amount": "150.00", "currency": "ARS", "provider": "AcmePay"},
+    )
+
+    payments = client.get("/payments")
+    operations = client.get(f"/payments/{created.json()['id']}/operations")
+
+    assert payments.status_code == 200
+    assert [payment["id"] for payment in payments.json()] == [created.json()["id"]]
+    assert operations.status_code == 200
+    assert operations.json()[0]["event_type"] == "payment.created"
+    assert '"correlation_id": "operator-context-42"' in operations.json()[0]["detail"]
+    assert operations.json()[1]["event_type"] == "payment.provider_succeeded"
+
+
+def test_integrations_are_listed_and_can_be_retrieved():
+    integrations = client.get("/integrations")
+    integration = client.get("/integrations/acmepay")
+    missing_integration = client.get("/integrations/unknown")
+
+    assert integrations.status_code == 200
+    assert [item["name"] for item in integrations.json()] == ["acmepay", "declinepay", "timeoutpay"]
+    assert integration.json()["display_name"] == "AcmePay"
+    assert missing_integration.status_code == 404
 
 
 def test_refund_is_rejected_for_a_failed_payment():
@@ -81,6 +112,25 @@ def test_health_check_reports_service_is_available():
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def test_frontend_origin_is_allowed_to_read_the_api():
+    response = client.options(
+        "/payments",
+        headers={
+            "Origin": "http://127.0.0.1:5173",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://127.0.0.1:5173"
+
+
+def test_operator_api_requires_basic_authentication():
+    response = TestClient(app).get("/payments")
+
+    assert response.status_code == 401
 
 
 def test_payment_uses_a_generated_correlation_id_when_header_is_missing():

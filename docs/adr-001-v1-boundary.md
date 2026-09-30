@@ -2,7 +2,7 @@
 
 ## Decision
 
-V1 records integration operations but does not call a provider. It uses synchronous SQLAlchemy sessions and creates database tables at startup only as a local-development convenience.
+V1 records integration operations and uses synchronous SQLAlchemy sessions. It creates database tables at startup only as a local-development convenience.
 
 ## Why
 
@@ -10,4 +10,4 @@ The first learning objective is a coherent Python API, validation, persistence, 
 
 ## Consequences
 
-`pending` is currently a truthful state: no provider outcome has been obtained. V2 will introduce provider adapters and a transition to `succeeded`/`failed`; Alembic should replace `create_all` before shared deployment.
+The original planned V2 is the React/TypeScript frontend; provider adapters belong to V3 and real integration concerns to V4. A limited provider simulator was merged into `master` ahead of that plan and is deliberately preserved, but it does not change the roadmap or constitute completed V3 work. Alembic should replace `create_all` before shared deployment.

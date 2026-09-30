@@ -26,14 +26,14 @@ This file is the implementation checklist derived from the original project brie
 
 ## V2 — React / TypeScript frontend
 
-- [ ] Create a React + TypeScript application that consumes the real FastAPI API.
-- [ ] Dashboard view.
-- [ ] Payments list and payment-details views.
-- [ ] Integration list and integration-details views.
-- [ ] Request/response inspection UI.
-- [ ] Loading, validation, and error states.
-- [ ] Basic authentication only when the backend contract is ready.
-- [ ] Add focused frontend tests and document the frontend structure.
+- [x] Create a React + TypeScript application that consumes the real FastAPI API.
+- [x] Dashboard view.
+- [x] Payments list and payment-details views.
+- [x] Integration list and integration-details views.
+- [x] Sanitized operation inspection UI for payment request and provider-result context.
+- [x] Loading, validation, and error states.
+- [x] Local operator authentication using the real backend contract; production identity remains V4 work.
+- [x] Add focused frontend tests and document the frontend structure.
 
 ## V3 — Integration simulation
 
