@@ -6,7 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.models import OperationLog, Payment, PaymentStatus, Refund, RefundStatus
-from app.providers import NormalizedProviderError, get_payment_provider
+from app.providers import NormalizedProviderError, ProviderChargeRequest, get_payment_provider
 from app.schemas import PaymentCreate, RefundCreate
 
 
@@ -19,7 +19,7 @@ class InvalidRefundError(Exception):
 
 
 def create_payment(session: Session, request: PaymentCreate, correlation_id: str) -> Payment:
-    payment = Payment(**request.model_dump(), correlation_id=correlation_id)
+    payment = Payment(**request.model_dump(exclude={"simulation_case"}), correlation_id=correlation_id)
     session.add(payment)
     session.flush()
     session.add(
@@ -32,19 +32,36 @@ def create_payment(session: Session, request: PaymentCreate, correlation_id: str
                     "currency": request.currency,
                     "provider": request.provider,
                     "correlation_id": correlation_id,
+                    "simulation_case": request.simulation_case,
                 }
             ),
         )
     )
     try:
-        result = get_payment_provider(request.provider).charge(payment.id, payment.amount, payment.currency)
+        result = get_payment_provider(request.provider).charge(
+            ProviderChargeRequest(
+                payment_id=payment.id,
+                amount=payment.amount,
+                currency=payment.currency,
+                correlation_id=correlation_id,
+                simulation_case=request.simulation_case,
+            )
+        )
         payment.status = PaymentStatus.SUCCEEDED
         payment.provider_reference = result.reference
         session.add(
             OperationLog(
                 payment_id=payment.id,
                 event_type="payment.provider_succeeded",
-                detail=json.dumps({"provider": request.provider, "reference": result.reference}),
+                detail=json.dumps(
+                    {
+                        "provider": request.provider,
+                        "reference": result.reference,
+                        "http_status": result.http_status,
+                        "latency_ms": result.latency_ms,
+                        "raw_response": result.raw_response,
+                    }
+                ),
             )
         )
     except NormalizedProviderError as error:
@@ -57,7 +74,14 @@ def create_payment(session: Session, request: PaymentCreate, correlation_id: str
                 payment_id=payment.id,
                 event_type="payment.provider_failed",
                 detail=json.dumps(
-                    {"code": error.code, "message": error.message, "retryable": error.retryable}
+                    {
+                        "code": error.code,
+                        "message": error.message,
+                        "retryable": error.retryable,
+                        "http_status": error.http_status,
+                        "latency_ms": error.latency_ms,
+                        "raw_response": error.raw_response,
+                    }
                 ),
             )
         )

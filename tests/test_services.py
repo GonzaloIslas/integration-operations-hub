@@ -79,7 +79,12 @@ def test_refund_cannot_exceed_payment_when_existing_refund_is_pending(session: S
 def test_provider_failure_is_persisted_as_a_normalized_operation_log(session: Session):
     payment = create_payment(
         session,
-        PaymentCreate(amount=Decimal("50.00"), currency="USD", provider="TimeoutPay"),
+        PaymentCreate(
+            amount=Decimal("50.00"),
+            currency="USD",
+            provider="SlowPay",
+            simulation_case="timeout",
+        ),
         "provider-failure-correlation-id",
     )
     failure_log = session.scalar(
@@ -93,3 +98,26 @@ def test_provider_failure_is_persisted_as_a_normalized_operation_log(session: Se
     assert payment.retryable is True
     assert failure_log is not None
     assert '"retryable": true' in failure_log.detail
+
+
+def test_provider_log_preserves_sanitized_protocol_context(session: Session):
+    payment = create_payment(
+        session,
+        PaymentCreate(
+            amount=Decimal("50.00"),
+            currency="USD",
+            provider="BrokenPay",
+            simulation_case="rate_limited",
+        ),
+        "rate-limit-correlation-id",
+    )
+    failure_log = session.scalar(
+        select(OperationLog).where(
+            OperationLog.payment_id == payment.id, OperationLog.event_type == "payment.provider_failed"
+        )
+    )
+
+    assert payment.failure_code == "provider_rate_limited"
+    assert failure_log is not None
+    assert '"http_status": 429' in failure_log.detail
+    assert '"raw_response": "{\\"error\\":\\"rate_limit_exceeded\\"}"' in failure_log.detail

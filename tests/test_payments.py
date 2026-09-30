@@ -73,13 +73,19 @@ def test_integrations_are_listed_and_can_be_retrieved():
     missing_integration = client.get("/integrations/unknown")
 
     assert integrations.status_code == 200
-    assert [item["name"] for item in integrations.json()] == ["acmepay", "declinepay", "timeoutpay"]
+    assert [item["name"] for item in integrations.json()] == [
+        "acmepay",
+        "bancox",
+        "walletpro",
+        "slowpay",
+        "brokenpay",
+    ]
     assert integration.json()["display_name"] == "AcmePay"
     assert missing_integration.status_code == 404
 
 
 def test_refund_is_rejected_for_a_failed_payment():
-    response = client.post("/payments", json={"amount": "50.00", "currency": "USD", "provider": "DeclinePay"})
+    response = client.post("/payments", json={"amount": "50.00", "currency": "USD", "provider": "WalletPro"})
     refund = client.post(f"/payments/{response.json()['id']}/refunds", json={"amount": "10.00"})
     assert refund.status_code == 409
     assert refund.json()["detail"] == "Only succeeded payments can be refunded."
@@ -166,31 +172,61 @@ def test_payment_and_refund_payloads_are_validated():
         json={"amount": "10.00", "currency": "USD", "provider": "AcmePay"},
     )
     invalid_refund = client.post(f"/payments/{payment.json()['id']}/refunds", json={"amount": "0"})
+    invalid_simulation_case = client.post(
+        "/payments",
+        json={
+            "amount": "10.00",
+            "currency": "USD",
+            "provider": "AcmePay",
+            "simulation_case": "not-a-scenario",
+        },
+    )
 
     assert invalid_payment.status_code == 422
     assert invalid_refund.status_code == 422
+    assert invalid_simulation_case.status_code == 422
 
 
-def test_provider_decline_is_normalized_in_the_payment_response():
+def test_provider_authentication_failure_is_normalized_in_the_payment_response():
     response = client.post(
         "/payments",
-        json={"amount": "10.00", "currency": "USD", "provider": "DeclinePay"},
+        json={"amount": "10.00", "currency": "USD", "provider": "WalletPro"},
     )
 
     assert response.status_code == 201
     assert response.json()["status"] == "failed"
-    assert response.json()["failure_code"] == "card_declined"
-    assert response.json()["failure_message"] == "The provider declined the payment."
+    assert response.json()["failure_code"] == "provider_authentication_failed"
+    assert response.json()["failure_message"] == "The provider rejected the integration credentials."
     assert response.json()["retryable"] is False
 
 
 def test_provider_timeout_is_normalized_as_retryable():
     response = client.post(
         "/payments",
-        json={"amount": "10.00", "currency": "USD", "provider": "TimeoutPay"},
+        json={
+            "amount": "10.00",
+            "currency": "USD",
+            "provider": "SlowPay",
+            "simulation_case": "timeout",
+        },
     )
 
     assert response.status_code == 201
     assert response.json()["status"] == "failed"
     assert response.json()["failure_code"] == "provider_timeout"
+    assert response.json()["retryable"] is True
+
+
+def test_rate_limited_provider_response_is_normalized():
+    response = client.post(
+        "/payments",
+        json={
+            "amount": "10.00",
+            "currency": "USD",
+            "provider": "BrokenPay",
+            "simulation_case": "rate_limited",
+        },
+    )
+
+    assert response.json()["failure_code"] == "provider_rate_limited"
     assert response.json()["retryable"] is True
