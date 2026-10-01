@@ -20,7 +20,8 @@ Read this roadmap before planning or implementing a version. Map work to the pro
 - [x] V5 production engineering is merged into `master`.
 - [x] V6 operational dashboard is merged into `master`.
 - [x] V7 request inspector is merged into `master`.
-- [x] V8 asynchronous retries are implemented on `v8` and await review/merge.
+- [x] V8 asynchronous retries are merged into `master`.
+- [x] V9 documentation and runbook are implemented on `v9` and await review/merge.
 - [ ] PostgreSQL migrations, shared-database safety, and the V1 API/data-model review remain deliberate follow-up work.
 
 ## V1 — Python backend
@@ -69,12 +70,12 @@ Read this roadmap before planning or implementing a version. Map work to the pro
 
 - [x] RabbitMQ worker, retry policies, exponential backoff, idempotent retry-job creation, and dead-letter behavior.
 - [x] Operator retry status in payment details and dashboard queue/dead-letter counts.
-- [ ] Merge the reviewed `v8` work into `master` before beginning V9.
 
 ## V9 — Documentation and runbook
 
-- [ ] Product overview, requirements, assumptions, architecture, API, data model, integration mapping, failure scenarios, deployment, troubleshooting, testing strategy, and ADRs.
-- [ ] Make the README demonstrate relevant senior backend, integration, and full-stack project experience honestly.
+- [x] Product overview, requirements, assumptions, architecture, API, data model, integration mapping, failure scenarios, deployment, troubleshooting, testing strategy, and ADR map.
+- [x] README positions relevant project experience honestly for senior backend, integration, and full-stack discussions.
+- [ ] Merge the reviewed `v9` work into `master` before beginning V10.
 
 ## V10 — AI / Integration Copilot
 
