@@ -86,4 +86,4 @@ The canonical evolution plan is [TODO.md](./TODO.md). New project work starts fr
 
 ## Coverage
 
-The current measured Python branch-aware coverage baseline is 86%. CI enforces a minimum 85% coverage, runs the full backend suite, and uploads `coverage.xml` as a workflow artifact. The intentional gap to 100% is documented by unexercised external process boundaries such as real RabbitMQ consumption and real OpenAI SDK calls; those are tested through deterministic seams instead of live services.
+The current measured Python branch-aware coverage baseline is 86%. CI shows the measured percentage and required 85% minimum in the GitHub Actions job summary, then uploads `coverage.xml` and `coverage.json` as workflow artifacts. The intentional gap to 100% is documented by unexercised external process boundaries such as real RabbitMQ consumption and real OpenAI SDK calls; those are tested through deterministic seams instead of live services.
