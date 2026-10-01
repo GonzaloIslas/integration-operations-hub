@@ -1,7 +1,8 @@
-import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useState } from "react";
 import {
   ApiError,
   clearOperatorCredentials,
+  getDashboard,
   getIntegration,
   getIntegrations,
   getPayment,
@@ -10,7 +11,7 @@ import {
   hasOperatorCredentials,
   setOperatorCredentials
 } from "./api";
-import type { Integration, OperationLog, Payment, PaymentStatus } from "./types";
+import type { DashboardData, Integration, OperationLog, Payment, PaymentStatus, ProviderHealth } from "./types";
 
 type View = "dashboard" | "payments" | "integrations";
 
@@ -42,6 +43,7 @@ export default function App() {
   const [view, setView] = useState<View>("dashboard");
   const [isAuthenticated, setIsAuthenticated] = useState(hasOperatorCredentials);
   const [payments, setPayments] = useState<Payment[]>([]);
+  const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [integrations, setIntegrations] = useState<Integration[]>([]);
   const [selectedPayment, setSelectedPayment] = useState<Payment | null>(null);
   const [operations, setOperations] = useState<OperationLog[]>([]);
@@ -54,9 +56,10 @@ export default function App() {
     setIsLoading(true);
     setError(null);
     try {
-      const [paymentData, integrationData] = await Promise.all([getPayments(), getIntegrations()]);
+      const [paymentData, integrationData, dashboardData] = await Promise.all([getPayments(), getIntegrations(), getDashboard()]);
       setPayments(paymentData);
       setIntegrations(integrationData);
+      setDashboard(dashboardData);
     } catch (caughtError) {
       setError(caughtError instanceof ApiError ? caughtError.message : "The API could not be reached.");
     } finally {
@@ -73,9 +76,10 @@ export default function App() {
     setError(null);
     setIsLoading(true);
     try {
-      const [paymentData, integrationData] = await Promise.all([getPayments(), getIntegrations()]);
+      const [paymentData, integrationData, dashboardData] = await Promise.all([getPayments(), getIntegrations(), getDashboard()]);
       setPayments(paymentData);
       setIntegrations(integrationData);
+      setDashboard(dashboardData);
       setIsAuthenticated(true);
     } catch (caughtError) {
       clearOperatorCredentials();
@@ -84,14 +88,6 @@ export default function App() {
       setIsLoading(false);
     }
   };
-
-  const paymentCounts = useMemo(
-    () => payments.reduce<Record<PaymentStatus, number>>(
-      (counts, payment) => ({ ...counts, [payment.status]: counts[payment.status] + 1 }),
-      { pending: 0, succeeded: 0, failed: 0, refunded: 0 }
-    ),
-    [payments]
-  );
 
   if (!isAuthenticated) {
     return <Login isLoading={isLoading} error={error} onAuthenticate={authenticate} />;
@@ -164,7 +160,7 @@ export default function App() {
         ) : (
           <>
             {view === "dashboard" && (
-              <Dashboard payments={payments} integrations={integrations} counts={paymentCounts} onPaymentSelect={selectPayment} />
+              <Dashboard dashboard={dashboard} onPaymentSelect={selectPayment} />
             )}
             {view === "payments" && (
               <PaymentsView payments={payments} selectedPayment={selectedPayment} operations={operations} onSelect={selectPayment} />
@@ -181,40 +177,49 @@ export default function App() {
 }
 
 function Dashboard({
-  payments,
-  integrations,
-  counts,
+  dashboard,
   onPaymentSelect
 }: {
-  payments: Payment[];
-  integrations: Integration[];
-  counts: Record<PaymentStatus, number>;
+  dashboard: DashboardData | null;
   onPaymentSelect: (paymentId: string) => Promise<void>;
 }) {
+  if (!dashboard) return <p className="empty-state">Dashboard data is not available yet.</p>;
+  const { summary, providers, recent_failures: recentFailures, recent_payments: recentPayments } = dashboard;
   return (
     <>
-      <section className="metric-grid" aria-label="Payment status summary">
-        {(["succeeded", "failed", "refunded", "pending"] as PaymentStatus[]).map((status) => (
-          <article className="metric-card" key={status}>
-            <span>{statusLabels[status]}</span>
-            <strong>{counts[status]}</strong>
-          </article>
-        ))}
+      <section className="metric-grid" aria-label="Operational summary">
+        <MetricCard label="Success rate" value={`${summary.success_rate}%`} detail={`${summary.successful_payments} successful`} />
+        <MetricCard label="Error rate" value={`${summary.error_rate}%`} detail={`${summary.failed_payments} failed`} />
+        <MetricCard label="Average latency" value={summary.average_latency_ms === null ? "—" : `${summary.average_latency_ms} ms`} detail="Observed provider responses" />
+        <MetricCard label="Retry queue" value={String(summary.retryable_failures)} detail="Retryable failed payments" />
       </section>
       <section className="content-grid">
         <article className="panel">
-          <div className="panel-heading"><h2>Recent payments</h2><span>{payments.length} total</span></div>
-          <PaymentTable payments={payments.slice(0, 5)} onSelect={onPaymentSelect} />
+          <div className="panel-heading"><h2>Recent requests</h2><span>{summary.total_payments} total</span></div>
+          <PaymentTable payments={recentPayments} onSelect={onPaymentSelect} />
         </article>
         <article className="panel">
-          <div className="panel-heading"><h2>Integrations</h2><span>{integrations.length} configured</span></div>
-          <ul className="integration-summary">
-            {integrations.map((integration) => <li key={integration.name}><strong>{integration.display_name}</strong><span>Simulator</span></li>)}
-          </ul>
+          <div className="panel-heading"><h2>Provider health</h2><span>{providers.length} monitored</span></div>
+          <ProviderHealthTable providers={providers} />
         </article>
+      </section>
+      <section className="panel dashboard-failures">
+        <div className="panel-heading"><h2>Recent failures</h2><span>{summary.failed_payments} total failures</span></div>
+        <PaymentTable payments={recentFailures} onSelect={onPaymentSelect} />
       </section>
     </>
   );
+}
+
+function MetricCard({ label, value, detail }: { label: string; value: string; detail: string }) {
+  return <article className="metric-card"><span>{label}</span><strong>{value}</strong><small>{detail}</small></article>;
+}
+
+function ProviderHealthTable({ providers }: { providers: ProviderHealth[] }) {
+  return <ul className="provider-health-list">{providers.map((provider) => <li key={provider.name}>
+    <div><strong>{provider.display_name}</strong><span>{provider.success_rate}% success · {provider.error_rate}% error</span></div>
+    <div className="provider-health-detail"><HealthBadge health={provider.health} /><small>{provider.average_latency_ms === null ? "No latency" : `${provider.average_latency_ms} ms`}</small>{provider.retryable_failures > 0 && <small>{provider.retryable_failures} retryable</small>}</div>
+  </li>)}</ul>;
 }
 
 function PaymentsView({
@@ -263,6 +268,10 @@ function IntegrationsView({ integrations, selectedIntegration, onSelect }: { int
 
 function StatusBadge({ status }: { status: PaymentStatus }) {
   return <span className={`status-badge ${status}`}>{statusLabels[status]}</span>;
+}
+
+function HealthBadge({ health }: { health: ProviderHealth["health"] }) {
+  return <span className={`health-badge ${health}`}>{health}</span>;
 }
 
 function Login({

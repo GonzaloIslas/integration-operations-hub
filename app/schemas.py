@@ -71,3 +71,32 @@ class IntegrationRead(BaseModel):
     display_name: str
     description: str
     is_simulated: bool = True
+
+
+class DashboardSummaryRead(BaseModel):
+    total_payments: int
+    successful_payments: int
+    failed_payments: int
+    refunded_payments: int
+    success_rate: float
+    error_rate: float
+    retryable_failures: int
+    average_latency_ms: float | None
+
+
+class ProviderHealthRead(BaseModel):
+    name: str
+    display_name: str
+    health: Literal["healthy", "degraded", "down", "unknown"]
+    total_payments: int
+    success_rate: float
+    error_rate: float
+    average_latency_ms: float | None
+    retryable_failures: int
+
+
+class DashboardRead(BaseModel):
+    summary: DashboardSummaryRead
+    providers: list[ProviderHealthRead]
+    recent_payments: list[PaymentRead]
+    recent_failures: list[PaymentRead]
