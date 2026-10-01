@@ -83,3 +83,7 @@ Start with the [documentation map](./docs/README.md):
 - [Integration Copilot](./docs/v10-integration-copilot.md)
 
 The canonical evolution plan is [TODO.md](./TODO.md). New project work starts from `master`, and every completed milestone ends in verification, commit, push, and pull request.
+
+## Coverage
+
+The current measured Python branch-aware coverage baseline is 86%. CI enforces a minimum 85% coverage, runs the full backend suite, and uploads `coverage.xml` as a workflow artifact. The intentional gap to 100% is documented by unexercised external process boundaries such as real RabbitMQ consumption and real OpenAI SDK calls; those are tested through deterministic seams instead of live services.
