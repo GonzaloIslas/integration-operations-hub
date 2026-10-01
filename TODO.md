@@ -19,7 +19,8 @@ Read this roadmap before planning or implementing a version. Map work to the pro
 - [x] V4 integration controls are merged into `master`.
 - [x] V5 production engineering is merged into `master`.
 - [x] V6 operational dashboard is merged into `master`.
-- [x] V7 request inspector is implemented on `v7` and awaits review/merge.
+- [x] V7 request inspector is merged into `master`.
+- [x] V8 asynchronous retries are implemented on `v8` and await review/merge.
 - [ ] PostgreSQL migrations, shared-database safety, and the V1 API/data-model review remain deliberate follow-up work.
 
 ## V1 — Python backend
@@ -63,11 +64,12 @@ Read this roadmap before planning or implementing a version. Map work to the pro
 
 - [x] Show sanitized request headers/body and response status/body for an integration operation.
 - [x] Preserve enough context to troubleshoot failures without exposing secrets.
-- [ ] Merge the reviewed `v7` work into `master` before beginning V8.
 
 ## V8 — Retry and asynchronous processing
 
-- [ ] Introduce RabbitMQ, workers, retry policies, backoff, idempotency, and dead-letter behavior only after the synchronous integration flow is solid.
+- [x] RabbitMQ worker, retry policies, exponential backoff, idempotent retry-job creation, and dead-letter behavior.
+- [x] Operator retry status in payment details and dashboard queue/dead-letter counts.
+- [ ] Merge the reviewed `v8` work into `master` before beginning V9.
 
 ## V9 — Documentation and runbook
 

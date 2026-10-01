@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     api_rate_limit: int = 100
     api_rate_window_seconds: int = 60
     provider_timeout_ms: int = 2_000
+    rabbitmq_url: str = "amqp://guest:guest@localhost:5672/%2F"
+    retry_max_attempts: int = 3
+    retry_initial_backoff_seconds: int = 5
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 

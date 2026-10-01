@@ -59,6 +59,8 @@ export interface DashboardSummary {
   success_rate: number;
   error_rate: number;
   retryable_failures: number;
+  queued_retries: number;
+  dead_letter_retries: number;
   average_latency_ms: number | null;
 }
 
@@ -78,4 +80,16 @@ export interface DashboardData {
   providers: ProviderHealth[];
   recent_payments: Payment[];
   recent_failures: Payment[];
+}
+
+export interface RetryJob {
+  id: string;
+  payment_id: string;
+  status: "queued" | "processing" | "retry_scheduled" | "completed" | "dead_letter";
+  attempts: number;
+  max_attempts: number;
+  next_attempt_at: string | null;
+  last_error: string | null;
+  created_at: string;
+  updated_at: string;
 }

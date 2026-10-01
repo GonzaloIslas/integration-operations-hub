@@ -8,11 +8,13 @@ import {
   getPayment,
   getPaymentInspections,
   getPaymentOperations,
+  getPaymentRetries,
   getPayments,
   hasOperatorCredentials,
+  queuePaymentRetry,
   setOperatorCredentials
 } from "./api";
-import type { DashboardData, Integration, OperationInspection, OperationLog, Payment, PaymentStatus, ProviderHealth } from "./types";
+import type { DashboardData, Integration, OperationInspection, OperationLog, Payment, PaymentStatus, ProviderHealth, RetryJob } from "./types";
 
 type View = "dashboard" | "payments" | "integrations";
 
@@ -61,6 +63,7 @@ export default function App() {
   const [selectedPayment, setSelectedPayment] = useState<Payment | null>(null);
   const [operations, setOperations] = useState<OperationLog[]>([]);
   const [inspections, setInspections] = useState<OperationInspection[]>([]);
+  const [retryJobs, setRetryJobs] = useState<RetryJob[]>([]);
   const [selectedIntegration, setSelectedIntegration] = useState<Integration | null>(null);
   const [isLoading, setIsLoading] = useState(hasOperatorCredentials);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -111,17 +114,33 @@ export default function App() {
     setDetailLoading(true);
     setError(null);
     try {
-      const [payment, operationData, inspectionData] = await Promise.all([
+      const [payment, operationData, inspectionData, retryData] = await Promise.all([
         getPayment(paymentId),
         getPaymentOperations(paymentId),
-        getPaymentInspections(paymentId)
+        getPaymentInspections(paymentId),
+        getPaymentRetries(paymentId)
       ]);
       setSelectedPayment(payment);
       setOperations(operationData);
       setInspections(inspectionData);
+      setRetryJobs(retryData);
       setView("payments");
     } catch (caughtError) {
       setError(caughtError instanceof ApiError ? caughtError.message : "Unable to load payment details.");
+    } finally {
+      setDetailLoading(false);
+    }
+  };
+
+  const queueRetry = async (paymentId: string) => {
+    setDetailLoading(true);
+    setError(null);
+    try {
+      const job = await queuePaymentRetry(paymentId);
+      setRetryJobs((jobs) => [job, ...jobs.filter((existingJob) => existingJob.id !== job.id)]);
+      await loadOverview();
+    } catch (caughtError) {
+      setError(caughtError instanceof ApiError ? caughtError.message : "Unable to queue the retry.");
     } finally {
       setDetailLoading(false);
     }
@@ -182,7 +201,7 @@ export default function App() {
               <Dashboard dashboard={dashboard} onPaymentSelect={selectPayment} />
             )}
             {view === "payments" && (
-              <PaymentsView payments={payments} selectedPayment={selectedPayment} operations={operations} inspections={inspections} onSelect={selectPayment} />
+              <PaymentsView payments={payments} selectedPayment={selectedPayment} operations={operations} inspections={inspections} retryJobs={retryJobs} onQueueRetry={queueRetry} onSelect={selectPayment} />
             )}
             {view === "integrations" && (
               <IntegrationsView integrations={integrations} selectedIntegration={selectedIntegration} onSelect={selectIntegration} />
@@ -210,7 +229,7 @@ function Dashboard({
         <MetricCard label="Success rate" value={`${summary.success_rate}%`} detail={`${summary.successful_payments} successful`} />
         <MetricCard label="Error rate" value={`${summary.error_rate}%`} detail={`${summary.failed_payments} failed`} />
         <MetricCard label="Average latency" value={summary.average_latency_ms === null ? "—" : `${summary.average_latency_ms} ms`} detail="Observed provider responses" />
-        <MetricCard label="Retry queue" value={String(summary.retryable_failures)} detail="Retryable failed payments" />
+        <MetricCard label="Retry queue" value={String(summary.queued_retries)} detail={`${summary.dead_letter_retries} dead-lettered`} />
       </section>
       <section className="content-grid">
         <article className="panel">
@@ -246,18 +265,22 @@ function PaymentsView({
   selectedPayment,
   operations,
   inspections,
+  retryJobs,
+  onQueueRetry,
   onSelect
 }: {
   payments: Payment[];
   selectedPayment: Payment | null;
   operations: OperationLog[];
   inspections: OperationInspection[];
+  retryJobs: RetryJob[];
+  onQueueRetry: (paymentId: string) => Promise<void>;
   onSelect: (paymentId: string) => Promise<void>;
 }) {
   return (
     <section className="split-view">
       <article className="panel"><div className="panel-heading"><h2>Payments</h2><span>Live API records</span></div><PaymentTable payments={payments} onSelect={onSelect} /></article>
-      <PaymentDetail payment={selectedPayment} operations={operations} inspections={inspections} />
+      <PaymentDetail payment={selectedPayment} operations={operations} inspections={inspections} retryJobs={retryJobs} onQueueRetry={onQueueRetry} />
     </section>
   );
 }
@@ -271,17 +294,23 @@ function PaymentTable({ payments, onSelect }: { payments: Payment[]; onSelect: (
   );
 }
 
-function PaymentDetail({ payment, operations, inspections }: { payment: Payment | null; operations: OperationLog[]; inspections: OperationInspection[] }) {
+function PaymentDetail({ payment, operations, inspections, retryJobs, onQueueRetry }: { payment: Payment | null; operations: OperationLog[]; inspections: OperationInspection[]; retryJobs: RetryJob[]; onQueueRetry: (paymentId: string) => Promise<void> }) {
   if (!payment) return <article className="panel detail-panel"><h2>Payment details</h2><p className="empty-state">Select a payment to inspect its lifecycle and API operation records.</p></article>;
   return (
     <article className="panel detail-panel">
       <div className="panel-heading"><h2>Payment details</h2><StatusBadge status={payment.status} /></div>
       <dl className="detail-list"><dt>Amount</dt><dd>{formatAmount(payment.amount, payment.currency)}</dd><dt>Provider</dt><dd>{payment.provider}</dd><dt>Correlation ID</dt><dd className="mono">{payment.correlation_id}</dd><dt>Provider reference</dt><dd>{payment.provider_reference ?? "—"}</dd></dl>
       {payment.failure_code && <section className="failure-card"><strong>{payment.failure_code}</strong><p>{payment.failure_message}</p><span>{payment.retryable ? "Retryable" : "Not retryable"}</span></section>}
+      <section><div className="panel-heading"><h3>Retry status</h3>{payment.retryable && <button className="text-button" onClick={() => void onQueueRetry(payment.id)}>Queue retry</button>}</div><RetryJobList jobs={retryJobs} /></section>
       <section><h3>Operation inspector</h3><p className="help-text">Sanitized request and provider-result context recorded by the backend.</p><ol className="operation-list">{operations.map((operation) => <li key={operation.id}><div><strong>{operation.event_type}</strong><time>{formatDate(operation.created_at)}</time></div><pre>{prettyDetail(operation.detail)}</pre></li>)}</ol></section>
       <section><h3>Request / response inspector</h3><p className="help-text">Sensitive headers and body fields are redacted before snapshots are stored.</p><InspectionList inspections={inspections} /></section>
     </article>
   );
+}
+
+function RetryJobList({ jobs }: { jobs: RetryJob[] }) {
+  if (!jobs.length) return <p className="empty-state">No retry jobs have been queued for this payment.</p>;
+  return <ul className="retry-job-list">{jobs.map((job) => <li key={job.id}><div><strong>{job.status.replace("_", " ")}</strong><span>Attempt {job.attempts} of {job.max_attempts}</span></div><small>{job.next_attempt_at ? `Next attempt ${formatDate(job.next_attempt_at)}` : job.last_error ?? "No further attempt scheduled"}</small></li>)}</ul>;
 }
 
 function InspectionList({ inspections }: { inspections: OperationInspection[] }) {

@@ -12,6 +12,16 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
   api:
     build:
       context: .
@@ -22,8 +32,11 @@ services:
       OPERATOR_USERNAME: operator
       OPERATOR_PASSWORD: local-development-only
       INTEGRATION_API_KEY: local-integration-api-key
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/%2F
     depends_on:
       db:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
     ports:
       - "8000:8000"
@@ -32,6 +45,21 @@ services:
       interval: 10s
       timeout: 3s
       retries: 5
+  worker:
+    build:
+      context: .
+    command: ["python", "-m", "app.worker"]
+    environment:
+      APPLICATION_ENVIRONMENT: container
+      DATABASE_URL: postgresql+psycopg://hub:hub@db:5432/integration_hub
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/%2F
+      RETRY_MAX_ATTEMPTS: 3
+      RETRY_INITIAL_BACKOFF_SECONDS: 5
+    depends_on:
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
   frontend:
     build:
       context: ./frontend

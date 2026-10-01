@@ -8,6 +8,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.database import Base
 from app.main import app, database_session
+from app.messaging import RecordingRetryPublisher, get_retry_publisher
 from app.models import Payment, PaymentStatus
 
 test_engine = create_engine(
@@ -26,11 +27,16 @@ def override_session():
 app.dependency_overrides[database_session] = override_session
 operator_token = base64.b64encode(b"operator:local-development-only").decode()
 client = TestClient(app, headers={"Authorization": f"Basic {operator_token}"})
+retry_publisher = RecordingRetryPublisher()
+app.dependency_overrides[get_retry_publisher] = lambda: retry_publisher
 
 
 def setup_function():
     Base.metadata.drop_all(test_engine)
     Base.metadata.create_all(test_engine)
+    retry_publisher.enqueued.clear()
+    retry_publisher.scheduled.clear()
+    retry_publisher.dead_letters.clear()
 
 
 def test_create_and_read_payment_preserves_correlation_id():
@@ -222,6 +228,8 @@ def test_dashboard_aggregates_provider_health_recent_failures_and_retry_queue():
         "success_rate": 33.3,
         "error_rate": 66.7,
         "retryable_failures": 2,
+        "queued_retries": 0,
+        "dead_letter_retries": 0,
         "average_latency_ms": 1026.7,
     }
     assert providers["acmepay"]["health"] == "healthy"
@@ -237,7 +245,7 @@ def test_integration_api_key_authenticates_a_service_client():
     assert response.headers["X-RateLimit-Remaining"]
 
 
-def test_manual_retry_can_recover_a_retryable_provider_failure():
+def test_retry_request_creates_and_enqueues_a_durable_job():
     created = client.post(
         "/payments",
         json={"amount": "25.00", "currency": "USD", "provider": "BrokenPay"},
@@ -246,8 +254,11 @@ def test_manual_retry_can_recover_a_retryable_provider_failure():
     retried = client.post(f"/payments/{created.json()['id']}/retry", json={"simulation_case": "normal"})
 
     assert created.json()["failure_code"] == "provider_unavailable"
-    assert retried.status_code == 200
-    assert retried.json()["status"] == "succeeded"
+    assert retried.status_code == 202
+    assert retried.json()["status"] == "queued"
+    assert retried.json()["attempts"] == 0
+    assert retry_publisher.enqueued == [uuid.UUID(retried.json()["id"])]
+    assert client.get(f"/payments/{created.json()['id']}/retries").json()[0]["id"] == retried.json()["id"]
 
 
 def test_webhook_is_authenticated_idempotent_and_updates_payment_status():

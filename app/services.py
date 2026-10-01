@@ -1,16 +1,18 @@
 import json
 import uuid
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.config import get_settings
-from app.models import OperationLog, Payment, PaymentStatus, Refund, RefundStatus, WebhookEvent
+from app.models import OperationLog, Payment, PaymentStatus, Refund, RefundStatus, RetryJob, RetryJobStatus, WebhookEvent
 from app.providers import (
     NormalizedProviderError,
     ProviderChargeRequest,
     SimulationCase,
+    get_provider_definition,
     get_payment_provider,
     list_provider_definitions,
 )
@@ -34,6 +36,10 @@ class InvalidRetryError(Exception):
 
 
 class InvalidWebhookError(Exception):
+    pass
+
+
+class RetryJobNotFoundError(Exception):
     pass
 
 
@@ -137,6 +143,94 @@ def get_payment_inspections(session: Session, payment_id: uuid.UUID) -> list[dic
     return inspections
 
 
+def create_retry_job(session: Session, payment_id: uuid.UUID, request: RetryCreate) -> tuple[RetryJob, bool]:
+    payment = get_payment(session, payment_id)
+    if payment.status != PaymentStatus.FAILED or not payment.retryable:
+        raise InvalidRetryError("Only retryable failed payments can be queued for retry.")
+    active_job = session.scalar(
+        select(RetryJob).where(
+            RetryJob.payment_id == payment_id,
+            RetryJob.status.in_([RetryJobStatus.QUEUED, RetryJobStatus.PROCESSING, RetryJobStatus.RETRY_SCHEDULED]),
+        )
+    )
+    if active_job is not None:
+        return active_job, True
+    simulation_case = request.simulation_case or _payment_simulation_case(payment)
+    job = RetryJob(
+        payment_id=payment.id,
+        correlation_id=payment.correlation_id,
+        simulation_case=simulation_case.value if simulation_case else None,
+        max_attempts=get_settings().retry_max_attempts,
+    )
+    session.add(job)
+    session.flush()
+    session.add(
+        OperationLog(
+            payment_id=payment.id,
+            event_type="payment.retry_queued",
+            detail=json.dumps({"retry_job_id": str(job.id), "correlation_id": payment.correlation_id}),
+        )
+    )
+    session.commit()
+    session.refresh(job)
+    return job, False
+
+
+def get_retry_jobs(session: Session, payment_id: uuid.UUID) -> list[RetryJob]:
+    get_payment(session, payment_id)
+    statement = select(RetryJob).where(RetryJob.payment_id == payment_id).order_by(RetryJob.created_at.desc())
+    return list(session.scalars(statement))
+
+
+def process_retry_job(session: Session, job_id: uuid.UUID) -> RetryJob:
+    job = session.get(RetryJob, job_id)
+    if job is None:
+        raise RetryJobNotFoundError
+    if job.status in {RetryJobStatus.COMPLETED, RetryJobStatus.DEAD_LETTER}:
+        return job
+    job.status = RetryJobStatus.PROCESSING
+    job.attempts += 1
+    payment = get_payment(session, job.payment_id)
+    simulation_case = SimulationCase(job.simulation_case) if job.simulation_case else _payment_simulation_case(payment)
+    payment = retry_payment(session, payment.id, RetryCreate(simulation_case=simulation_case))
+
+    if payment.status != PaymentStatus.FAILED or not payment.retryable:
+        job.status = RetryJobStatus.COMPLETED
+        job.next_attempt_at = None
+        job.last_error = None
+        event_type = "payment.retry_job_completed"
+    elif job.attempts >= job.max_attempts:
+        job.status = RetryJobStatus.DEAD_LETTER
+        job.next_attempt_at = None
+        job.last_error = payment.failure_message
+        event_type = "payment.retry_job_dead_lettered"
+    else:
+        delay_seconds = get_settings().retry_initial_backoff_seconds * (2 ** (job.attempts - 1))
+        job.status = RetryJobStatus.RETRY_SCHEDULED
+        job.next_attempt_at = datetime.now(UTC) + timedelta(seconds=delay_seconds)
+        job.last_error = payment.failure_message
+        event_type = "payment.retry_job_scheduled"
+    session.add(
+        OperationLog(
+            payment_id=payment.id,
+            event_type=event_type,
+            detail=json.dumps(
+                {
+                    "retry_job_id": str(job.id),
+                    "attempt": job.attempts,
+                    "status": job.status,
+                    "next_attempt_at": job.next_attempt_at,
+                    "correlation_id": payment.correlation_id,
+                },
+                default=str,
+            ),
+        )
+    )
+    session.commit()
+    session.refresh(job)
+    return job
+
+
 def get_dashboard(session: Session, recent_limit: int = 5) -> dict[str, object]:
     payments = list(
         session.scalars(select(Payment).options(selectinload(Payment.refunds)).order_by(Payment.created_at.desc()))
@@ -215,6 +309,14 @@ def get_dashboard(session: Session, recent_limit: int = 5) -> dict[str, object]:
     failed_payments = sum(payment.status == PaymentStatus.FAILED for payment in payments)
     refunded_payments = sum(payment.status == PaymentStatus.REFUNDED for payment in payments)
     retryable_failures = sum(payment.status == PaymentStatus.FAILED and bool(payment.retryable) for payment in payments)
+    queued_retries = session.scalar(
+        select(func.count()).select_from(RetryJob).where(
+            RetryJob.status.in_([RetryJobStatus.QUEUED, RetryJobStatus.PROCESSING, RetryJobStatus.RETRY_SCHEDULED])
+        )
+    ) or 0
+    dead_letter_retries = session.scalar(
+        select(func.count()).select_from(RetryJob).where(RetryJob.status == RetryJobStatus.DEAD_LETTER)
+    ) or 0
     all_latencies = [latency for provider in providers.values() for latency in provider["latencies"]]
 
     return {
@@ -226,6 +328,8 @@ def get_dashboard(session: Session, recent_limit: int = 5) -> dict[str, object]:
             "success_rate": round(successful_payments / total_payments * 100, 1) if total_payments else 0.0,
             "error_rate": round(failed_payments / total_payments * 100, 1) if total_payments else 0.0,
             "retryable_failures": retryable_failures,
+            "queued_retries": queued_retries,
+            "dead_letter_retries": dead_letter_retries,
             "average_latency_ms": round(sum(all_latencies) / len(all_latencies), 1) if all_latencies else None,
         },
         "providers": sorted(provider_health, key=lambda provider: provider["display_name"]),
@@ -238,19 +342,20 @@ def retry_payment(session: Session, payment_id: uuid.UUID, request: RetryCreate)
     payment = get_payment(session, payment_id)
     if payment.status != PaymentStatus.FAILED or not payment.retryable:
         raise InvalidRetryError("Only retryable failed payments can be retried.")
-    payment.simulation_case = request.simulation_case.value
+    simulation_case = request.simulation_case or _payment_simulation_case(payment)
+    payment.simulation_case = simulation_case.value if simulation_case else None
     session.add(
         OperationLog(
             payment_id=payment.id,
             event_type="payment.retry_requested",
-            detail=json.dumps({"simulation_case": request.simulation_case}),
+            detail=json.dumps({"simulation_case": simulation_case}),
         )
     )
     _apply_provider_outcome(
         session,
         payment,
         correlation_id=payment.correlation_id,
-        simulation_case=request.simulation_case,
+        simulation_case=simulation_case,
         success_event="payment.retry_succeeded",
         failure_event="payment.retry_failed",
     )
@@ -450,6 +555,13 @@ def _matches_idempotent_request(payment: Payment, request: PaymentCreate) -> boo
 
 def _simulation_case_value(simulation_case: SimulationCase | None) -> str | None:
     return simulation_case.value if simulation_case is not None else None
+
+
+def _payment_simulation_case(payment: Payment) -> SimulationCase | None:
+    if payment.simulation_case:
+        return SimulationCase(payment.simulation_case)
+    provider = get_provider_definition(payment.provider)
+    return provider.default_case if provider else None
 
 
 def _health_status(total_payments: int, error_rate: float) -> str:

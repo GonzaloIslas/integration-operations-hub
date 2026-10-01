@@ -60,7 +60,8 @@ def test_operator_workflow_covers_idempotency_retry_webhook_and_metrics():
 
         assert created.status_code == 201
         assert replayed.headers["Idempotency-Replayed"] == "true"
-        assert retried.json()["status"] == "succeeded"
+        assert retried.status_code == 202
+        assert retried.json()["status"] == "queued"
         assert webhook.json()["status"] == "succeeded"
         assert any("system-workflow-42" in operation["detail"] for operation in operations.json())
         assert "ioh_http_requests_total" in metrics.text

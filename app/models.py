@@ -22,6 +22,14 @@ class RefundStatus(StrEnum):
     FAILED = "failed"
 
 
+class RetryJobStatus(StrEnum):
+    QUEUED = "queued"
+    PROCESSING = "processing"
+    RETRY_SCHEDULED = "retry_scheduled"
+    COMPLETED = "completed"
+    DEAD_LETTER = "dead_letter"
+
+
 class Payment(Base):
     __tablename__ = "payments"
 
@@ -79,3 +87,19 @@ class WebhookEvent(Base):
     event_type: Mapped[str] = mapped_column(String(64), nullable=False)
     payload: Mapped[str] = mapped_column(Text, nullable=False)
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class RetryJob(Base):
+    __tablename__ = "retry_jobs"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    payment_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("payments.id"), nullable=False, index=True)
+    correlation_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    simulation_case: Mapped[str | None] = mapped_column(String(32))
+    status: Mapped[RetryJobStatus] = mapped_column(String(32), default=RetryJobStatus.QUEUED, nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
