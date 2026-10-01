@@ -3,7 +3,7 @@ from datetime import datetime
 from decimal import Decimal
 from enum import StrEnum
 
-from sqlalchemy import DateTime, ForeignKey, Numeric, String, Text, UniqueConstraint, func
+from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -60,6 +60,11 @@ class OperationLog(Base):
     payment_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("payments.id"), nullable=False)
     event_type: Mapped[str] = mapped_column(String(64), nullable=False)
     detail: Mapped[str | None] = mapped_column(Text)
+    request_headers: Mapped[str | None] = mapped_column(Text)
+    request_body: Mapped[str | None] = mapped_column(Text)
+    response_status: Mapped[int | None] = mapped_column(Integer)
+    response_headers: Mapped[str | None] = mapped_column(Text)
+    response_body: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

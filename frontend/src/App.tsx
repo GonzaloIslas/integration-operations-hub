@@ -6,12 +6,13 @@ import {
   getIntegration,
   getIntegrations,
   getPayment,
+  getPaymentInspections,
   getPaymentOperations,
   getPayments,
   hasOperatorCredentials,
   setOperatorCredentials
 } from "./api";
-import type { DashboardData, Integration, OperationLog, Payment, PaymentStatus, ProviderHealth } from "./types";
+import type { DashboardData, Integration, OperationInspection, OperationLog, Payment, PaymentStatus, ProviderHealth } from "./types";
 
 type View = "dashboard" | "payments" | "integrations";
 
@@ -39,6 +40,18 @@ function prettyDetail(detail: string | null) {
   }
 }
 
+function prettyPayload(value: unknown) {
+  if (value === null || value === undefined) return "No body recorded.";
+  if (typeof value === "string") {
+    try {
+      return JSON.stringify(JSON.parse(value), null, 2);
+    } catch {
+      return value;
+    }
+  }
+  return JSON.stringify(value, null, 2);
+}
+
 export default function App() {
   const [view, setView] = useState<View>("dashboard");
   const [isAuthenticated, setIsAuthenticated] = useState(hasOperatorCredentials);
@@ -47,6 +60,7 @@ export default function App() {
   const [integrations, setIntegrations] = useState<Integration[]>([]);
   const [selectedPayment, setSelectedPayment] = useState<Payment | null>(null);
   const [operations, setOperations] = useState<OperationLog[]>([]);
+  const [inspections, setInspections] = useState<OperationInspection[]>([]);
   const [selectedIntegration, setSelectedIntegration] = useState<Integration | null>(null);
   const [isLoading, setIsLoading] = useState(hasOperatorCredentials);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -97,9 +111,14 @@ export default function App() {
     setDetailLoading(true);
     setError(null);
     try {
-      const [payment, operationData] = await Promise.all([getPayment(paymentId), getPaymentOperations(paymentId)]);
+      const [payment, operationData, inspectionData] = await Promise.all([
+        getPayment(paymentId),
+        getPaymentOperations(paymentId),
+        getPaymentInspections(paymentId)
+      ]);
       setSelectedPayment(payment);
       setOperations(operationData);
+      setInspections(inspectionData);
       setView("payments");
     } catch (caughtError) {
       setError(caughtError instanceof ApiError ? caughtError.message : "Unable to load payment details.");
@@ -163,7 +182,7 @@ export default function App() {
               <Dashboard dashboard={dashboard} onPaymentSelect={selectPayment} />
             )}
             {view === "payments" && (
-              <PaymentsView payments={payments} selectedPayment={selectedPayment} operations={operations} onSelect={selectPayment} />
+              <PaymentsView payments={payments} selectedPayment={selectedPayment} operations={operations} inspections={inspections} onSelect={selectPayment} />
             )}
             {view === "integrations" && (
               <IntegrationsView integrations={integrations} selectedIntegration={selectedIntegration} onSelect={selectIntegration} />
@@ -226,17 +245,19 @@ function PaymentsView({
   payments,
   selectedPayment,
   operations,
+  inspections,
   onSelect
 }: {
   payments: Payment[];
   selectedPayment: Payment | null;
   operations: OperationLog[];
+  inspections: OperationInspection[];
   onSelect: (paymentId: string) => Promise<void>;
 }) {
   return (
     <section className="split-view">
       <article className="panel"><div className="panel-heading"><h2>Payments</h2><span>Live API records</span></div><PaymentTable payments={payments} onSelect={onSelect} /></article>
-      <PaymentDetail payment={selectedPayment} operations={operations} />
+      <PaymentDetail payment={selectedPayment} operations={operations} inspections={inspections} />
     </section>
   );
 }
@@ -250,7 +271,7 @@ function PaymentTable({ payments, onSelect }: { payments: Payment[]; onSelect: (
   );
 }
 
-function PaymentDetail({ payment, operations }: { payment: Payment | null; operations: OperationLog[] }) {
+function PaymentDetail({ payment, operations, inspections }: { payment: Payment | null; operations: OperationLog[]; inspections: OperationInspection[] }) {
   if (!payment) return <article className="panel detail-panel"><h2>Payment details</h2><p className="empty-state">Select a payment to inspect its lifecycle and API operation records.</p></article>;
   return (
     <article className="panel detail-panel">
@@ -258,8 +279,20 @@ function PaymentDetail({ payment, operations }: { payment: Payment | null; opera
       <dl className="detail-list"><dt>Amount</dt><dd>{formatAmount(payment.amount, payment.currency)}</dd><dt>Provider</dt><dd>{payment.provider}</dd><dt>Correlation ID</dt><dd className="mono">{payment.correlation_id}</dd><dt>Provider reference</dt><dd>{payment.provider_reference ?? "—"}</dd></dl>
       {payment.failure_code && <section className="failure-card"><strong>{payment.failure_code}</strong><p>{payment.failure_message}</p><span>{payment.retryable ? "Retryable" : "Not retryable"}</span></section>}
       <section><h3>Operation inspector</h3><p className="help-text">Sanitized request and provider-result context recorded by the backend.</p><ol className="operation-list">{operations.map((operation) => <li key={operation.id}><div><strong>{operation.event_type}</strong><time>{formatDate(operation.created_at)}</time></div><pre>{prettyDetail(operation.detail)}</pre></li>)}</ol></section>
+      <section><h3>Request / response inspector</h3><p className="help-text">Sensitive headers and body fields are redacted before snapshots are stored.</p><InspectionList inspections={inspections} /></section>
     </article>
   );
+}
+
+function InspectionList({ inspections }: { inspections: OperationInspection[] }) {
+  if (!inspections.length) return <p className="empty-state">No provider request or response snapshots were recorded for this payment.</p>;
+  return <ol className="inspection-list">{inspections.map((inspection) => <li key={inspection.id}>
+    <div className="inspection-heading"><strong>{inspection.event_type}</strong><time>{formatDate(inspection.created_at)}</time></div>
+    <div className="inspection-grid">
+      <section><h4>Request</h4><p>Headers</p><pre>{prettyPayload(inspection.request.headers)}</pre><p>Body</p><pre>{prettyPayload(inspection.request.body)}</pre></section>
+      <section><h4>Response {inspection.response_status ?? "unavailable"}</h4><p>Headers</p><pre>{prettyPayload(inspection.response.headers)}</pre><p>Body</p><pre>{prettyPayload(inspection.response.body)}</pre></section>
+    </div>
+  </li>)}</ol>;
 }
 
 function IntegrationsView({ integrations, selectedIntegration, onSelect }: { integrations: Integration[]; selectedIntegration: Integration | null; onSelect: (name: string) => Promise<void> }) {

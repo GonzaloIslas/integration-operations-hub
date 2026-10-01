@@ -8,6 +8,7 @@ vi.mock("./api", () => ({
   getPayments: vi.fn(),
   getIntegrations: vi.fn(),
   getPayment: vi.fn(),
+  getPaymentInspections: vi.fn(),
   getPaymentOperations: vi.fn(),
   getIntegration: vi.fn(),
   hasOperatorCredentials: vi.fn(() => true),
