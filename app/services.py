@@ -112,6 +112,31 @@ def get_payment_operations(session: Session, payment_id: uuid.UUID) -> list[Oper
     return list(session.scalars(statement))
 
 
+def get_payment_inspections(session: Session, payment_id: uuid.UUID) -> list[dict[str, object]]:
+    operations = get_payment_operations(session, payment_id)
+    inspections = []
+    for operation in operations:
+        if operation.request_headers is None and operation.request_body is None:
+            continue
+        inspections.append(
+            {
+                "id": operation.id,
+                "event_type": operation.event_type,
+                "created_at": operation.created_at,
+                "request": {
+                    "headers": _decode_json(operation.request_headers, {}),
+                    "body": _decode_json(operation.request_body, None),
+                },
+                "response_status": operation.response_status,
+                "response": {
+                    "headers": _decode_json(operation.response_headers, {}),
+                    "body": _decode_json(operation.response_body, None),
+                },
+            }
+        )
+    return inspections
+
+
 def get_dashboard(session: Session, recent_limit: int = 5) -> dict[str, object]:
     payments = list(
         session.scalars(select(Payment).options(selectinload(Payment.refunds)).order_by(Payment.created_at.desc()))
@@ -278,6 +303,11 @@ def process_webhook(session: Session, provider: str, event: WebhookEventCreate) 
                     "correlation_id": payment.correlation_id,
                 }
             ),
+            request_headers=_encode_json(_sanitize_headers({"X-API-Key": "local-integration-api-key"})),
+            request_body=_encode_json(_sanitize_body(event.model_dump())),
+            response_status=200,
+            response_headers=_encode_json({"Content-Type": "application/json"}),
+            response_body=_encode_json({"payment_id": str(payment.id), "status": payment.status}),
         )
     )
     session.commit()
@@ -354,6 +384,20 @@ def _apply_provider_outcome(
                         "correlation_id": correlation_id,
                     }
                 ),
+                request_headers=_encode_json(_sanitize_headers({"Authorization": "Bearer provider-api-key"})),
+                request_body=_encode_json(
+                    _sanitize_body(
+                        {
+                            "amount": str(payment.amount),
+                            "currency": payment.currency,
+                            "correlation_id": correlation_id,
+                            "provider": payment.provider,
+                        }
+                    )
+                ),
+                response_status=result.http_status,
+                response_headers=_encode_json({"Content-Type": _content_type(result.raw_response)}),
+                response_body=result.raw_response,
             )
         )
     except NormalizedProviderError as error:
@@ -377,6 +421,20 @@ def _apply_provider_outcome(
                         "correlation_id": correlation_id,
                     }
                 ),
+                request_headers=_encode_json(_sanitize_headers({"Authorization": "Bearer provider-api-key"})),
+                request_body=_encode_json(
+                    _sanitize_body(
+                        {
+                            "amount": str(payment.amount),
+                            "currency": payment.currency,
+                            "correlation_id": correlation_id,
+                            "provider": payment.provider,
+                        }
+                    )
+                ),
+                response_status=error.http_status,
+                response_headers=_encode_json({"Content-Type": _content_type(error.raw_response)}),
+                response_body=error.raw_response,
             )
         )
 
@@ -402,3 +460,40 @@ def _health_status(total_payments: int, error_rate: float) -> str:
     if error_rate < 25:
         return "degraded"
     return "down"
+
+
+def _sanitize_headers(headers: dict[str, str]) -> dict[str, str]:
+    sensitive_headers = {"authorization", "cookie", "set-cookie", "x-api-key"}
+    return {
+        name: "<redacted>" if name.lower() in sensitive_headers else value
+        for name, value in headers.items()
+    }
+
+
+def _sanitize_body(value: object) -> object:
+    sensitive_markers = ("authorization", "password", "secret", "token", "api_key", "apikey")
+    if isinstance(value, dict):
+        return {
+            key: "<redacted>" if any(marker in key.lower() for marker in sensitive_markers) else _sanitize_body(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_sanitize_body(item) for item in value]
+    return value
+
+
+def _encode_json(value: object) -> str:
+    return json.dumps(value, default=str)
+
+
+def _decode_json(value: str | None, fallback: object) -> object:
+    if value is None:
+        return fallback
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return value
+
+
+def _content_type(body: str | None) -> str:
+    return "application/json" if body and body.lstrip().startswith("{") else "text/plain"

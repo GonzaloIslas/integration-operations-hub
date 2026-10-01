@@ -19,7 +19,7 @@ V5 makes the application operable as a small production-style service:
 
 Redis, RabbitMQ, workers, distributed rate limiting, and asynchronous retries are intentionally deferred. The present synchronous workload does not justify that infrastructure; V8 will add it when retry orchestration becomes the product concern.
 
-## Current milestone: V6 operational dashboard
+## V6 operational dashboard
 
 V6 turns persisted payment and lifecycle data into an operational dashboard backed by `GET /dashboard`:
 
@@ -29,6 +29,16 @@ V6 turns persisted payment and lifecycle data into an operational dashboard back
 - Recent requests and recent failures that link to the existing payment inspector.
 
 These are derived from the current database and lifecycle logs, not fabricated frontend data. The dashboard deliberately reports observed historical data; V5/V6 do not yet include a separate metrics store, alerting, or distributed tracing.
+
+## Current milestone: V7 request inspector
+
+V7 adds a dedicated request/response inspector to the payment drill-down. Provider interactions now retain sanitized snapshots of:
+
+- Request headers and body.
+- Response status, headers, and body.
+- Event timestamp and lifecycle event type.
+
+Sensitive headers (`Authorization`, API keys, cookies) and sensitive body fields (passwords, secrets, tokens, and API keys) are redacted before a snapshot is persisted. The UI renders the stored snapshot; it never reconstructs it from a live provider request.
 
 ## Architecture
 
@@ -67,6 +77,7 @@ All operations endpoints require either local HTTP Basic credentials or `X-API-K
 | GET | `/payments?limit=&offset=` | List payments with offset pagination |
 | GET | `/payments/{payment_id}` | Retrieve a payment and refunds |
 | GET | `/payments/{payment_id}/operations` | Retrieve sanitized lifecycle context |
+| GET | `/payments/{payment_id}/inspections` | Retrieve sanitized request/response snapshots |
 | POST | `/payments/{payment_id}/retry` | Manually retry an eligible failed payment |
 | POST | `/payments/{payment_id}/refunds` | Create a validated refund |
 | POST | `/webhooks/{provider}` | Ingest an idempotent provider webhook |

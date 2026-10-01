@@ -9,13 +9,14 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.database import Base, engine, get_session
+from app.database import Base, apply_schema_compatibility, engine, get_session
 from app.observability import configure_logging, elapsed_milliseconds, metrics, start_timer
 from app.providers import get_integration, list_integrations
 from app.schemas import (
     IntegrationRead,
     DashboardRead,
     OperationLogRead,
+    OperationInspectionRead,
     PaymentCreate,
     PaymentRead,
     RefundCreate,
@@ -33,6 +34,7 @@ from app.services import (
     create_refund,
     get_payment,
     get_dashboard,
+    get_payment_inspections,
     get_payment_operations,
     list_payments,
     process_webhook,
@@ -56,6 +58,7 @@ app.add_middleware(
 @app.on_event("startup")
 def create_tables() -> None:
     Base.metadata.create_all(bind=engine)
+    apply_schema_compatibility()
 
 
 def database_session() -> Generator[Session, None, None]:
@@ -194,6 +197,20 @@ def read_payment_operations(
 ) -> list[OperationLogRead]:
     try:
         return [OperationLogRead.model_validate(operation) for operation in get_payment_operations(session, payment_id)]
+    except PaymentNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Payment not found.") from error
+
+
+@app.get(
+    "/payments/{payment_id}/inspections",
+    response_model=list[OperationInspectionRead],
+    dependencies=[Depends(enforce_rate_limit)],
+)
+def read_payment_inspections(
+    payment_id: uuid.UUID, session: Session = Depends(database_session)
+) -> list[OperationInspectionRead]:
+    try:
+        return [OperationInspectionRead.model_validate(inspection) for inspection in get_payment_inspections(session, payment_id)]
     except PaymentNotFoundError as error:
         raise HTTPException(status_code=404, detail="Payment not found.") from error
 

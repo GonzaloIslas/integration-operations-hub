@@ -27,7 +27,21 @@ export interface OperationLog {
   id: string;
   event_type: string;
   detail: string | null;
+    created_at: string;
+}
+
+export interface InspectionMessage {
+  headers: Record<string, string>;
+  body: unknown | null;
+}
+
+export interface OperationInspection {
+  id: string;
+  event_type: string;
   created_at: string;
+  request: InspectionMessage;
+  response_status: number | null;
+  response: InspectionMessage;
 }
 
 export interface Integration {

@@ -58,6 +58,7 @@ def test_payment_list_and_operations_expose_operator_context():
 
     payments = client.get("/payments")
     operations = client.get(f"/payments/{created.json()['id']}/operations")
+    inspections = client.get(f"/payments/{created.json()['id']}/inspections")
 
     assert payments.status_code == 200
     assert [payment["id"] for payment in payments.json()] == [created.json()["id"]]
@@ -65,6 +66,11 @@ def test_payment_list_and_operations_expose_operator_context():
     assert operations.json()[0]["event_type"] == "payment.created"
     assert '"correlation_id": "operator-context-42"' in operations.json()[0]["detail"]
     assert operations.json()[1]["event_type"] == "payment.provider_succeeded"
+    assert inspections.status_code == 200
+    assert inspections.json()[0]["request"]["headers"] == {"Authorization": "<redacted>"}
+    assert inspections.json()[0]["request"]["body"]["correlation_id"] == "operator-context-42"
+    assert inspections.json()[0]["response_status"] == 201
+    assert "provider-api-key" not in str(inspections.json())
 
 
 def test_integrations_are_listed_and_can_be_retrieved():

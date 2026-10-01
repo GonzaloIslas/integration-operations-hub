@@ -1,4 +1,4 @@
-import type { DashboardData, Integration, OperationLog, Payment } from "./types";
+import type { DashboardData, Integration, OperationInspection, OperationLog, Payment } from "./types";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
 const credentialsStorageKey = "integration-operations-hub.operator-credentials";
@@ -37,5 +37,6 @@ export const getPayments = () => request<Payment[]>("/payments");
 export const getDashboard = () => request<DashboardData>("/dashboard");
 export const getPayment = (paymentId: string) => request<Payment>(`/payments/${paymentId}`);
 export const getPaymentOperations = (paymentId: string) => request<OperationLog[]>(`/payments/${paymentId}/operations`);
+export const getPaymentInspections = (paymentId: string) => request<OperationInspection[]>(`/payments/${paymentId}/inspections`);
 export const getIntegrations = () => request<Integration[]>("/integrations");
 export const getIntegration = (integrationName: string) => request<Integration>(`/integrations/${integrationName}`);

@@ -18,7 +18,8 @@ Read this roadmap before planning or implementing a version. Map work to the pro
 - [x] V3 replaces the earlier limited simulator with the planned five-provider integration simulation and contract tests.
 - [x] V4 integration controls are merged into `master`.
 - [x] V5 production engineering is merged into `master`.
-- [x] V6 operational dashboard is implemented on `v6` and awaits review/merge.
+- [x] V6 operational dashboard is merged into `master`.
+- [x] V7 request inspector is implemented on `v7` and awaits review/merge.
 - [ ] PostgreSQL migrations, shared-database safety, and the V1 API/data-model review remain deliberate follow-up work.
 
 ## V1 — Python backend
@@ -57,12 +58,12 @@ Read this roadmap before planning or implementing a version. Map work to the pro
 ## V6 — Operational dashboard
 
 - [x] Provider health, success/error rate, observed request latency, recent requests/failures, payment status, and retry status.
-- [ ] Merge the reviewed `v6` work into `master` before beginning V7.
 
 ## V7 — Request inspector
 
-- [ ] Show sanitized request headers/body and response status/body for an integration operation.
-- [ ] Preserve enough context to troubleshoot failures without exposing secrets.
+- [x] Show sanitized request headers/body and response status/body for an integration operation.
+- [x] Preserve enough context to troubleshoot failures without exposing secrets.
+- [ ] Merge the reviewed `v7` work into `master` before beginning V8.
 
 ## V8 — Retry and asynchronous processing
 

@@ -65,6 +65,20 @@ class OperationLogRead(BaseModel):
     created_at: datetime
 
 
+class InspectionMessageRead(BaseModel):
+    headers: dict[str, str]
+    body: Any | None
+
+
+class OperationInspectionRead(BaseModel):
+    id: uuid.UUID
+    event_type: str
+    created_at: datetime
+    request: InspectionMessageRead
+    response_status: int | None
+    response: InspectionMessageRead
+
+
 class IntegrationRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     name: str
