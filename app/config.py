@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     rabbitmq_url: str = "amqp://guest:guest@localhost:5672/%2F"
     retry_max_attempts: int = 3
     retry_initial_backoff_seconds: int = 5
+    openai_api_key: str | None = None
+    openai_model: str = "gpt-6-astra"
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 

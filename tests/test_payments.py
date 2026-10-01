@@ -2,12 +2,13 @@ import base64
 import uuid
 
 from fastapi.testclient import TestClient
+from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.database import Base
-from app.main import app, database_session
+from app.main import app, configured_copilot, database_session
 from app.messaging import RecordingRetryPublisher, get_retry_publisher
 from app.models import Payment, PaymentStatus
 
@@ -364,3 +365,65 @@ def test_rate_limited_provider_response_is_normalized():
 
     assert response.json()["failure_code"] == "provider_rate_limited"
     assert response.json()["retryable"] is True
+
+
+def test_copilot_explanation_is_grounded_in_sanitized_payment_evidence():
+    class FakeCopilot:
+        model = "test-grounded-model"
+
+        def __init__(self) -> None:
+            self.evidence = None
+
+        def explain(self, question, evidence) -> str:
+            self.evidence = evidence
+            return f"Grounded answer for: {question}"
+
+    fake_copilot = FakeCopilot()
+    previous_override = app.dependency_overrides.get(configured_copilot)
+    app.dependency_overrides[configured_copilot] = lambda: fake_copilot
+    try:
+        payment = client.post(
+            "/payments",
+            json={"amount": "10.00", "currency": "USD", "provider": "BrokenPay"},
+        )
+        response = client.post(
+            f"/payments/{payment.json()['id']}/copilot",
+            json={"question": "Why did this payment fail?"},
+        )
+    finally:
+        if previous_override is None:
+            app.dependency_overrides.pop(configured_copilot, None)
+        else:
+            app.dependency_overrides[configured_copilot] = previous_override
+
+    assert response.status_code == 200
+    assert response.json()["grounded"] is True
+    assert response.json()["model"] == "test-grounded-model"
+    assert "provider_unavailable" in str(fake_copilot.evidence)
+    assert "provider-api-key" not in str(fake_copilot.evidence)
+    assert {source["kind"] for source in response.json()["sources"]} >= {"payment", "operations", "inspections"}
+
+
+def test_copilot_requires_an_explicit_openai_api_key_configuration():
+    def unavailable_copilot():
+        raise HTTPException(status_code=503, detail="Copilot is unavailable until OPENAI_API_KEY is configured.")
+
+    payment = client.post(
+        "/payments",
+        json={"amount": "10.00", "currency": "USD", "provider": "AcmePay"},
+    )
+    previous_override = app.dependency_overrides.get(configured_copilot)
+    app.dependency_overrides[configured_copilot] = unavailable_copilot
+    try:
+        response = client.post(
+            f"/payments/{payment.json()['id']}/copilot",
+            json={"question": "Summarize this payment."},
+        )
+    finally:
+        if previous_override is None:
+            app.dependency_overrides.pop(configured_copilot, None)
+        else:
+            app.dependency_overrides[configured_copilot] = previous_override
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Copilot is unavailable until OPENAI_API_KEY is configured."

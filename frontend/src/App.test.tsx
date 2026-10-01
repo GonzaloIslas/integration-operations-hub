@@ -4,6 +4,7 @@ import App from "./App";
 
 vi.mock("./api", () => ({
   ApiError: class ApiError extends Error {},
+  askCopilot: vi.fn(),
   getDashboard: vi.fn(),
   getPayments: vi.fn(),
   getIntegrations: vi.fn(),

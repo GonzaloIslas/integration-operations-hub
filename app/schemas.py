@@ -37,6 +37,24 @@ class RetryJobRead(BaseModel):
     updated_at: datetime
 
 
+class CopilotQuestionCreate(BaseModel):
+    question: str = Field(min_length=3, max_length=1_000)
+
+
+class CopilotSourceRead(BaseModel):
+    kind: str
+    count: int
+    description: str
+
+
+class CopilotExplanationRead(BaseModel):
+    payment_id: uuid.UUID
+    answer: str
+    model: str
+    grounded: bool = True
+    sources: list[CopilotSourceRead]
+
+
 class WebhookEventCreate(BaseModel):
     event_id: str = Field(min_length=1, max_length=128)
     payment_id: uuid.UUID

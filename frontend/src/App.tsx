@@ -1,6 +1,7 @@
 import { type FormEvent, useEffect, useState } from "react";
 import {
   ApiError,
+  askCopilot,
   clearOperatorCredentials,
   getDashboard,
   getIntegration,
@@ -14,7 +15,7 @@ import {
   queuePaymentRetry,
   setOperatorCredentials
 } from "./api";
-import type { DashboardData, Integration, OperationInspection, OperationLog, Payment, PaymentStatus, ProviderHealth, RetryJob } from "./types";
+import type { CopilotExplanation, DashboardData, Integration, OperationInspection, OperationLog, Payment, PaymentStatus, ProviderHealth, RetryJob } from "./types";
 
 type View = "dashboard" | "payments" | "integrations";
 
@@ -64,6 +65,7 @@ export default function App() {
   const [operations, setOperations] = useState<OperationLog[]>([]);
   const [inspections, setInspections] = useState<OperationInspection[]>([]);
   const [retryJobs, setRetryJobs] = useState<RetryJob[]>([]);
+  const [copilotExplanation, setCopilotExplanation] = useState<CopilotExplanation | null>(null);
   const [selectedIntegration, setSelectedIntegration] = useState<Integration | null>(null);
   const [isLoading, setIsLoading] = useState(hasOperatorCredentials);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -124,9 +126,22 @@ export default function App() {
       setOperations(operationData);
       setInspections(inspectionData);
       setRetryJobs(retryData);
+      setCopilotExplanation(null);
       setView("payments");
     } catch (caughtError) {
       setError(caughtError instanceof ApiError ? caughtError.message : "Unable to load payment details.");
+    } finally {
+      setDetailLoading(false);
+    }
+  };
+
+  const requestCopilotExplanation = async (paymentId: string, question: string) => {
+    setDetailLoading(true);
+    setError(null);
+    try {
+      setCopilotExplanation(await askCopilot(paymentId, question));
+    } catch (caughtError) {
+      setError(caughtError instanceof ApiError ? caughtError.message : "Unable to request a copilot explanation.");
     } finally {
       setDetailLoading(false);
     }
@@ -201,7 +216,7 @@ export default function App() {
               <Dashboard dashboard={dashboard} onPaymentSelect={selectPayment} />
             )}
             {view === "payments" && (
-              <PaymentsView payments={payments} selectedPayment={selectedPayment} operations={operations} inspections={inspections} retryJobs={retryJobs} onQueueRetry={queueRetry} onSelect={selectPayment} />
+              <PaymentsView payments={payments} selectedPayment={selectedPayment} operations={operations} inspections={inspections} retryJobs={retryJobs} copilotExplanation={copilotExplanation} onQueueRetry={queueRetry} onAskCopilot={requestCopilotExplanation} onSelect={selectPayment} />
             )}
             {view === "integrations" && (
               <IntegrationsView integrations={integrations} selectedIntegration={selectedIntegration} onSelect={selectIntegration} />
@@ -266,7 +281,9 @@ function PaymentsView({
   operations,
   inspections,
   retryJobs,
+  copilotExplanation,
   onQueueRetry,
+  onAskCopilot,
   onSelect
 }: {
   payments: Payment[];
@@ -274,13 +291,15 @@ function PaymentsView({
   operations: OperationLog[];
   inspections: OperationInspection[];
   retryJobs: RetryJob[];
+  copilotExplanation: CopilotExplanation | null;
   onQueueRetry: (paymentId: string) => Promise<void>;
+  onAskCopilot: (paymentId: string, question: string) => Promise<void>;
   onSelect: (paymentId: string) => Promise<void>;
 }) {
   return (
     <section className="split-view">
       <article className="panel"><div className="panel-heading"><h2>Payments</h2><span>Live API records</span></div><PaymentTable payments={payments} onSelect={onSelect} /></article>
-      <PaymentDetail payment={selectedPayment} operations={operations} inspections={inspections} retryJobs={retryJobs} onQueueRetry={onQueueRetry} />
+      <PaymentDetail payment={selectedPayment} operations={operations} inspections={inspections} retryJobs={retryJobs} copilotExplanation={copilotExplanation} onQueueRetry={onQueueRetry} onAskCopilot={onAskCopilot} />
     </section>
   );
 }
@@ -294,7 +313,7 @@ function PaymentTable({ payments, onSelect }: { payments: Payment[]; onSelect: (
   );
 }
 
-function PaymentDetail({ payment, operations, inspections, retryJobs, onQueueRetry }: { payment: Payment | null; operations: OperationLog[]; inspections: OperationInspection[]; retryJobs: RetryJob[]; onQueueRetry: (paymentId: string) => Promise<void> }) {
+function PaymentDetail({ payment, operations, inspections, retryJobs, copilotExplanation, onQueueRetry, onAskCopilot }: { payment: Payment | null; operations: OperationLog[]; inspections: OperationInspection[]; retryJobs: RetryJob[]; copilotExplanation: CopilotExplanation | null; onQueueRetry: (paymentId: string) => Promise<void>; onAskCopilot: (paymentId: string, question: string) => Promise<void> }) {
   if (!payment) return <article className="panel detail-panel"><h2>Payment details</h2><p className="empty-state">Select a payment to inspect its lifecycle and API operation records.</p></article>;
   return (
     <article className="panel detail-panel">
@@ -302,10 +321,16 @@ function PaymentDetail({ payment, operations, inspections, retryJobs, onQueueRet
       <dl className="detail-list"><dt>Amount</dt><dd>{formatAmount(payment.amount, payment.currency)}</dd><dt>Provider</dt><dd>{payment.provider}</dd><dt>Correlation ID</dt><dd className="mono">{payment.correlation_id}</dd><dt>Provider reference</dt><dd>{payment.provider_reference ?? "—"}</dd></dl>
       {payment.failure_code && <section className="failure-card"><strong>{payment.failure_code}</strong><p>{payment.failure_message}</p><span>{payment.retryable ? "Retryable" : "Not retryable"}</span></section>}
       <section><div className="panel-heading"><h3>Retry status</h3>{payment.retryable && <button className="text-button" onClick={() => void onQueueRetry(payment.id)}>Queue retry</button>}</div><RetryJobList jobs={retryJobs} /></section>
+      <CopilotPanel key={payment.id} payment={payment} explanation={copilotExplanation} onAsk={onAskCopilot} />
       <section><h3>Operation inspector</h3><p className="help-text">Sanitized request and provider-result context recorded by the backend.</p><ol className="operation-list">{operations.map((operation) => <li key={operation.id}><div><strong>{operation.event_type}</strong><time>{formatDate(operation.created_at)}</time></div><pre>{prettyDetail(operation.detail)}</pre></li>)}</ol></section>
       <section><h3>Request / response inspector</h3><p className="help-text">Sensitive headers and body fields are redacted before snapshots are stored.</p><InspectionList inspections={inspections} /></section>
     </article>
   );
+}
+
+function CopilotPanel({ payment, explanation, onAsk }: { payment: Payment; explanation: CopilotExplanation | null; onAsk: (paymentId: string, question: string) => Promise<void> }) {
+  const [question, setQuestion] = useState(payment.failure_code ? "Why did this payment fail?" : "Summarize this payment outcome.");
+  return <section className="copilot-panel"><h3>Integration copilot</h3><p className="help-text">Uses sanitized payment evidence, lifecycle logs, retry state, provider mapping, and prior same-provider failures.</p><label>Question<textarea value={question} onChange={(event) => setQuestion(event.target.value)} /></label><button className="secondary-button" onClick={() => void onAsk(payment.id, question)}>Explain with copilot</button>{explanation && <div className="copilot-answer"><strong>Grounded explanation · {explanation.model}</strong><p>{explanation.answer}</p><ul>{explanation.sources.map((source) => <li key={source.kind}>{source.kind}: {source.count} — {source.description}</li>)}</ul></div>}</section>;
 }
 
 function RetryJobList({ jobs }: { jobs: RetryJob[] }) {
