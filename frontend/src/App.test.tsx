@@ -9,8 +9,10 @@ vi.mock("./api", () => ({
   getIntegrations: vi.fn(),
   getPayment: vi.fn(),
   getPaymentInspections: vi.fn(),
+  getPaymentRetries: vi.fn(),
   getPaymentOperations: vi.fn(),
   getIntegration: vi.fn(),
+  queuePaymentRetry: vi.fn(),
   hasOperatorCredentials: vi.fn(() => true),
   setOperatorCredentials: vi.fn(),
   clearOperatorCredentials: vi.fn()
@@ -38,7 +40,7 @@ describe("App", () => {
     vi.mocked(getDashboard).mockResolvedValue({
       summary: {
         total_payments: 1, successful_payments: 1, failed_payments: 0, refunded_payments: 0,
-        success_rate: 100, error_rate: 0, retryable_failures: 0, average_latency_ms: 80
+        success_rate: 100, error_rate: 0, retryable_failures: 0, queued_retries: 0, dead_letter_retries: 0, average_latency_ms: 80
       },
       providers: [{
         name: "acmepay", display_name: "AcmePay", health: "healthy", total_payments: 1,

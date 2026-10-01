@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.database import Base, apply_schema_compatibility, engine, get_session
+from app.messaging import MessagingUnavailableError, RetryPublisher, get_retry_publisher
 from app.observability import configure_logging, elapsed_milliseconds, metrics, start_timer
 from app.providers import get_integration, list_integrations
 from app.schemas import (
@@ -21,6 +22,7 @@ from app.schemas import (
     PaymentRead,
     RefundCreate,
     RetryCreate,
+    RetryJobRead,
     WebhookEventCreate,
 )
 from app.security import enforce_rate_limit
@@ -31,14 +33,15 @@ from app.services import (
     InvalidWebhookError,
     PaymentNotFoundError,
     create_payment,
+    create_retry_job,
     create_refund,
     get_payment,
     get_dashboard,
     get_payment_inspections,
+    get_retry_jobs,
     get_payment_operations,
     list_payments,
     process_webhook,
-    retry_payment,
 )
 
 configure_logging(get_settings().log_level)
@@ -217,20 +220,46 @@ def read_payment_inspections(
 
 @app.post(
     "/payments/{payment_id}/retry",
-    response_model=PaymentRead,
+    response_model=RetryJobRead,
+    status_code=status.HTTP_202_ACCEPTED,
     dependencies=[Depends(enforce_rate_limit)],
 )
 def post_payment_retry(
     payment_id: uuid.UUID,
     payload: RetryCreate,
+    response: Response,
+    publisher: RetryPublisher = Depends(get_retry_publisher),
     session: Session = Depends(database_session),
-) -> PaymentRead:
+) -> RetryJobRead:
     try:
-        return PaymentRead.model_validate(retry_payment(session, payment_id, payload))
+        job, replayed = create_retry_job(session, payment_id, payload)
     except PaymentNotFoundError as error:
         raise HTTPException(status_code=404, detail="Payment not found.") from error
     except InvalidRetryError as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+    if not replayed:
+        try:
+            publisher.enqueue(job.id)
+        except MessagingUnavailableError as error:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Retry job is queued but RabbitMQ is unavailable.") from error
+    response.headers["Idempotency-Replayed"] = str(replayed).lower()
+    if replayed:
+        response.status_code = status.HTTP_200_OK
+    return RetryJobRead.model_validate(job)
+
+
+@app.get(
+    "/payments/{payment_id}/retries",
+    response_model=list[RetryJobRead],
+    dependencies=[Depends(enforce_rate_limit)],
+)
+def read_payment_retries(
+    payment_id: uuid.UUID, session: Session = Depends(database_session)
+) -> list[RetryJobRead]:
+    try:
+        return [RetryJobRead.model_validate(job) for job in get_retry_jobs(session, payment_id)]
+    except PaymentNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Payment not found.") from error
 
 
 @app.post(

@@ -30,7 +30,7 @@ V6 turns persisted payment and lifecycle data into an operational dashboard back
 
 These are derived from the current database and lifecycle logs, not fabricated frontend data. The dashboard deliberately reports observed historical data; V5/V6 do not yet include a separate metrics store, alerting, or distributed tracing.
 
-## Current milestone: V7 request inspector
+## V7 request inspector
 
 V7 adds a dedicated request/response inspector to the payment drill-down. Provider interactions now retain sanitized snapshots of:
 
@@ -39,6 +39,18 @@ V7 adds a dedicated request/response inspector to the payment drill-down. Provid
 - Event timestamp and lifecycle event type.
 
 Sensitive headers (`Authorization`, API keys, cookies) and sensitive body fields (passwords, secrets, tokens, and API keys) are redacted before a snapshot is persisted. The UI renders the stored snapshot; it never reconstructs it from a live provider request.
+
+## Current milestone: V8 asynchronous retries
+
+V8 adds RabbitMQ-backed retry processing for retryable failed payments:
+
+- `POST /payments/{payment_id}/retry` creates a durable retry job and returns `202 Accepted`.
+- RabbitMQ carries only the retry-job ID; PostgreSQL remains the source of truth for attempt count, schedule, error, and terminal status.
+- The worker applies exponential backoff through a durable delay queue, then returns delayed messages to the retry queue.
+- After the configured maximum attempts, the job is marked `dead_letter` and published to a dead-letter queue.
+- Payment details show queued, scheduled, completed, and dead-letter retry state; retry queue and dead-letter counts appear on the dashboard.
+
+The initial payment path remains synchronous. V8 moves only retry orchestration into a worker, which keeps the change focused and lets the existing provider contract remain observable.
 
 ## Architecture
 
@@ -79,6 +91,7 @@ All operations endpoints require either local HTTP Basic credentials or `X-API-K
 | GET | `/payments/{payment_id}/operations` | Retrieve sanitized lifecycle context |
 | GET | `/payments/{payment_id}/inspections` | Retrieve sanitized request/response snapshots |
 | POST | `/payments/{payment_id}/retry` | Manually retry an eligible failed payment |
+| GET | `/payments/{payment_id}/retries` | Inspect retry-job history and status |
 | POST | `/payments/{payment_id}/refunds` | Create a validated refund |
 | POST | `/webhooks/{provider}` | Ingest an idempotent provider webhook |
 
@@ -129,4 +142,4 @@ npm run test
 npm run build
 ```
 
-See [docs/v5-production-engineering.md](./docs/v5-production-engineering.md) for operational boundaries and the verification strategy.
+See [docs/v5-production-engineering.md](./docs/v5-production-engineering.md) and [docs/v8-asynchronous-retries.md](./docs/v8-asynchronous-retries.md) for operational boundaries and retry-worker behavior.

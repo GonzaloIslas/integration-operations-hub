@@ -5,7 +5,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models import PaymentStatus, RefundStatus
+from app.models import PaymentStatus, RefundStatus, RetryJobStatus
 from app.providers import SimulationCase
 
 
@@ -21,7 +21,20 @@ class RefundCreate(BaseModel):
 
 
 class RetryCreate(BaseModel):
-    simulation_case: SimulationCase = SimulationCase.NORMAL
+    simulation_case: SimulationCase | None = None
+
+
+class RetryJobRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    payment_id: uuid.UUID
+    status: RetryJobStatus
+    attempts: int
+    max_attempts: int
+    next_attempt_at: datetime | None
+    last_error: str | None
+    created_at: datetime
+    updated_at: datetime
 
 
 class WebhookEventCreate(BaseModel):
@@ -95,6 +108,8 @@ class DashboardSummaryRead(BaseModel):
     success_rate: float
     error_rate: float
     retryable_failures: int
+    queued_retries: int
+    dead_letter_retries: int
     average_latency_ms: float | None
 
 
