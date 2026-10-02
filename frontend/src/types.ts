@@ -93,3 +93,17 @@ export interface RetryJob {
   created_at: string;
   updated_at: string;
 }
+
+export interface CopilotSource {
+  kind: string;
+  count: number;
+  description: string;
+}
+
+export interface CopilotExplanation {
+  payment_id: string;
+  answer: string;
+  model: string;
+  grounded: boolean;
+  sources: CopilotSource[];
+}

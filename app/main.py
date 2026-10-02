@@ -9,11 +9,14 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
+from app.copilot import CopilotClient, CopilotUnavailableError, explain_payment, get_copilot_client
 from app.database import Base, apply_schema_compatibility, engine, get_session
 from app.messaging import MessagingUnavailableError, RetryPublisher, get_retry_publisher
 from app.observability import configure_logging, elapsed_milliseconds, metrics, start_timer
 from app.providers import get_integration, list_integrations
 from app.schemas import (
+    CopilotExplanationRead,
+    CopilotQuestionCreate,
     IntegrationRead,
     DashboardRead,
     OperationLogRead,
@@ -66,6 +69,13 @@ def create_tables() -> None:
 
 def database_session() -> Generator[Session, None, None]:
     yield from get_session()
+
+
+def configured_copilot() -> CopilotClient:
+    try:
+        return get_copilot_client()
+    except CopilotUnavailableError as error:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)) from error
 
 
 @app.middleware("http")
@@ -216,6 +226,31 @@ def read_payment_inspections(
         return [OperationInspectionRead.model_validate(inspection) for inspection in get_payment_inspections(session, payment_id)]
     except PaymentNotFoundError as error:
         raise HTTPException(status_code=404, detail="Payment not found.") from error
+
+
+@app.post(
+    "/payments/{payment_id}/copilot",
+    response_model=CopilotExplanationRead,
+    dependencies=[Depends(enforce_rate_limit)],
+)
+def post_copilot_explanation(
+    payment_id: uuid.UUID,
+    payload: CopilotQuestionCreate,
+    copilot: CopilotClient = Depends(configured_copilot),
+    session: Session = Depends(database_session),
+) -> CopilotExplanationRead:
+    try:
+        result = explain_payment(session, payment_id, payload.question, copilot)
+    except PaymentNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Payment not found.") from error
+    except CopilotUnavailableError as error:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)) from error
+    return CopilotExplanationRead(
+        payment_id=payment_id,
+        answer=result.answer,
+        model=result.model,
+        sources=result.sources,
+    )
 
 
 @app.post(

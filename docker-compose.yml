@@ -33,6 +33,8 @@ services:
       OPERATOR_PASSWORD: local-development-only
       INTEGRATION_API_KEY: local-integration-api-key
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/%2F
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-6-astra}
     depends_on:
       db:
         condition: service_healthy

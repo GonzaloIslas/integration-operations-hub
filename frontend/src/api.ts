@@ -1,4 +1,4 @@
-import type { DashboardData, Integration, OperationInspection, OperationLog, Payment, RetryJob } from "./types";
+import type { CopilotExplanation, DashboardData, Integration, OperationInspection, OperationLog, Payment, RetryJob } from "./types";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
 const credentialsStorageKey = "integration-operations-hub.operator-credentials";
@@ -57,5 +57,6 @@ export const getPaymentOperations = (paymentId: string) => request<OperationLog[
 export const getPaymentInspections = (paymentId: string) => request<OperationInspection[]>(`/payments/${paymentId}/inspections`);
 export const getPaymentRetries = (paymentId: string) => request<RetryJob[]>(`/payments/${paymentId}/retries`);
 export const queuePaymentRetry = (paymentId: string) => post<RetryJob>(`/payments/${paymentId}/retry`);
+export const askCopilot = (paymentId: string, question: string) => post<CopilotExplanation>(`/payments/${paymentId}/copilot`, { question });
 export const getIntegrations = () => request<Integration[]>("/integrations");
 export const getIntegration = (integrationName: string) => request<Integration>(`/integrations/${integrationName}`);

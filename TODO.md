@@ -21,7 +21,8 @@ Read this roadmap before planning or implementing a version. Map work to the pro
 - [x] V6 operational dashboard is merged into `master`.
 - [x] V7 request inspector is merged into `master`.
 - [x] V8 asynchronous retries are merged into `master`.
-- [x] V9 documentation and runbook are implemented on `v9` and await review/merge.
+- [x] V9 documentation and runbook are merged into `master`.
+- [x] V10 Integration Copilot is implemented on `v10` and awaits review/merge.
 - [ ] PostgreSQL migrations, shared-database safety, and the V1 API/data-model review remain deliberate follow-up work.
 
 ## V1 — Python backend
@@ -75,12 +76,13 @@ Read this roadmap before planning or implementing a version. Map work to the pro
 
 - [x] Product overview, requirements, assumptions, architecture, API, data model, integration mapping, failure scenarios, deployment, troubleshooting, testing strategy, and ADR map.
 - [x] README positions relevant project experience honestly for senior backend, integration, and full-stack discussions.
-- [ ] Merge the reviewed `v9` work into `master` before beginning V10.
 
 ## V10 — AI / Integration Copilot
 
-- [ ] Only after the operational core works, add a grounded assistant for investigating real integration failures.
-- [ ] Use retrieved requests, responses, logs, provider documentation, and prior incidents; do not build a generic chat wrapper.
+- [x] Grounded assistant for payment-failure investigation after the operational core is in place.
+- [x] Evidence bundle uses sanitized payment data, request/response snapshots, logs, provider mapping, retry state, and prior same-provider failures.
+- [ ] Configure a real OpenAI API key for live model calls when ready; tests use a deterministic fake client.
+- [ ] Merge the reviewed `v10` work into `master`.
 
 ## Optional .NET interoperability
 
